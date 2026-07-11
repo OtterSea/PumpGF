@@ -1,0 +1,17 @@
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Build artifacts
+[Bb]in/
+[Oo]bj/
+
+# Unity generated meta for non-tracked folders
+# ( .meta files for actual package contents SHOULD be tracked)
