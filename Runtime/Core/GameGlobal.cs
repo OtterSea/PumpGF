@@ -15,11 +15,10 @@ namespace PumpGF
         /// </summary>
         public static PoolMgr PoolMgr { get; private set; }
 
-        // ──────────────────────────────────────────────────
-        //  未来模块在此添加属性，并在 EnsureInitialized 中按序初始化
-        //  例如:
-        //  public static ResMgr ResMgr { get; private set; }
-        // ──────────────────────────────────────────────────
+        /// <summary>
+        /// 资源加载模块
+        /// </summary>
+        public static ResMgr ResMgr { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
         static void EnsureInitialized()
@@ -31,9 +30,9 @@ namespace PumpGF
             PoolMgr = new PoolMgr();
             PoolMgr.Init();
 
-            // ResMgr 依赖 PoolMgr，排在后面
-            // ResMgr = new ResMgr();
-            // ResMgr.Init();
+            // ResMgr 依赖 PoolMgr
+            ResMgr = new ResMgr();
+            ResMgr.Init();
 
             Application.quitting += Dispose;
 
@@ -51,9 +50,10 @@ namespace PumpGF
             Application.quitting -= Dispose;
 
             // 按初始化的逆序释放
-            // ResMgr?.Dispose();
+            ResMgr?.Dispose();
             PoolMgr?.Dispose();
 
+            ResMgr = null;
             PoolMgr = null;
 
             Debug.Log("[PumpGF] GameGlobal disposed.");
