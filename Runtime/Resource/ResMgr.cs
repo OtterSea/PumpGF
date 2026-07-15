@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
@@ -12,146 +11,226 @@ using Object = UnityEngine.Object;
 namespace PumpGF
 {
     /// <summary>
-    /// 资源加载模块。Addressables 为主，Resources 为辅。
-    /// 所有异步方法返回 UniTask，支持 CancellationToken。
+    /// 资源加载模块。Addressables 为主，引用计数管理，实例自动托管。
+    /// 所有异步方法返回 UniTask，支持 CancellationToken 与进度回调。
     /// </summary>
     public sealed class ResMgr : IModule
     {
-        // key → 已加载的 Addressables handle（非泛型，Result 为 object）
-        Dictionary<string, AsyncOperationHandle> _handles;
-        // 非池化实例 → 对应的资源 key（用于 Release 时查找）
-        Dictionary<GameObject, string> _nonPooledInstances;
-        bool _addressablesReady;
+        // key → AssetEntry（引用计数条目）
+        private readonly Dictionary<string, AssetEntry> _entries = new(64);
+        // 实例 → 实例追踪条目
+        private readonly Dictionary<GameObject, InstanceEntry> _instances = new(128);
+        // Addressables 初始化任务（缓存，防并发竞态）
+        private UniTask _initTask;
+
+        // ──────────────────────────────────────────────
+        //  IModule
+        // ──────────────────────────────────────────────
 
         public void Init()
         {
-            _handles = new Dictionary<string, AsyncOperationHandle>(64);
-            _nonPooledInstances = new Dictionary<GameObject, string>(128);
-            _addressablesReady = false;
+            _initTask = default;
         }
 
         // ──────────────────────────────────────────────
-        //  Addressables 主接口
+        //  资产加载（引用计数）
         // ──────────────────────────────────────────────
 
         /// <summary>
-        /// 异步加载资源。同一 key 共享同一个 handle，多次调用不会重复加载。
-        /// 调用方在使用完毕后应调用 <see cref="UnloadAsset"/> 释放。
+        /// 异步加载资产，返回引用票据。同一 key 共享底层 handle，各自持有独立引用计数。
+        /// 调用方在使用完毕后必须 Dispose 返回的 AssetHandle。
         /// </summary>
-        public async UniTask<T> LoadAssetAsync<T>(string key, CancellationToken ct = default) where T : Object
+        public async UniTask<AssetHandle<T>> LoadAssetAsync<T>(
+            string key, IProgress<float> progress = null, CancellationToken ct = default)
+            where T : Object
         {
-            await EnsureAddressablesInitialized(ct);
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentException("Key cannot be null or empty.", nameof(key));
 
-            if (_handles.TryGetValue(key, out var existing))
+            await EnsureAddressablesInitialized();
+
+            // 已加载且引用计数 > 0：复用
+            if (_entries.TryGetValue(key, out var existing) && existing.RefCount > 0)
             {
-                return (T)existing.Result;
+                existing.AddRef();
+                progress?.Report(1f);
+                return new AssetHandle<T>(existing);
             }
 
+            // 新加载
             var handle = Addressables.LoadAssetAsync<T>(key);
-            _handles[key] = handle;
+            var entry = new AssetEntry
+            {
+                Key = key,
+                Handle = handle,
+                RefCount = 1
+            };
+            entry.OnReleased = OnEntryReleased;
+            _entries[key] = entry;
 
             await handle.ToUniTask(cancellationToken: ct);
 
             if (handle.Status != AsyncOperationStatus.Succeeded)
-                throw new InvalidOperationException($"[ResMgr] Failed to load asset '{key}': {handle.OperationException?.Message}");
+            {
+                Log.Error("ResMgr", $"加载失败: '{key}': {handle.OperationException?.Message}");
+                entry.Release();
+                throw new InvalidOperationException($"[ResMgr] Failed to load asset '{key}'");
+            }
 
-            return handle.Result;
+            progress?.Report(1f);
+            return new AssetHandle<T>(entry);
         }
 
+        // ──────────────────────────────────────────────
+        //  GameObject 实例化
+        // ──────────────────────────────────────────────
+
         /// <summary>
-        /// 异步实例化 GameObject。如果 PoolMgr 已注册对应 key 的池，则从池中取用；否则直接实例化。
+        /// 异步实例化 GameObject。若 PoolMgr 已注册对应 key 的池则走池，否则直接实例化。
+        /// 非池化实例绑定 destroyCancellationToken，销毁时自动清理引用。
         /// </summary>
         public async UniTask<GameObject> InstantiateAsync(
             string key, Vector3 position, Quaternion rotation, CancellationToken ct = default)
         {
-            // 确保资源已加载
-            await LoadAssetAsync<GameObject>(key, ct);
+            var handle = await LoadAssetAsync<GameObject>(key, ct: ct);
 
-            // 如果池已注册，走池
-            if (GameGlobal.PoolMgr.HasPool(key))
+            // 池化路径
+            if (GameGlobal.PoolMgr != null && GameGlobal.PoolMgr.HasPool(key))
             {
-                return GameGlobal.PoolMgr.Get(key, position, rotation);
+                var pooledInstance = GameGlobal.PoolMgr.Get(key, position, rotation);
+                _instances[pooledInstance] = new InstanceEntry
+                {
+                    Source = InstanceSource.Pool,
+                    AssetHandle = null
+                };
+                return pooledInstance;
             }
 
-            // 无池，直接实例化
-            var prefab = (GameObject)_handles[key].Result;
+            // 非池化路径
+            var prefab = handle.Asset;
+            if (prefab == null)
+            {
+                handle.Dispose();
+                throw new InvalidOperationException($"[ResMgr] Prefab is null for key '{key}'");
+            }
+
             var instance = Object.Instantiate(prefab, position, rotation);
-            _nonPooledInstances[instance] = key;
+            _instances[instance] = new InstanceEntry
+            {
+                Source = InstanceSource.Direct,
+                AssetHandle = handle
+            };
+
+            // 绑定 destroyCancellationToken：GameObject 销毁时自动清理
+            instance.destroyCancellationToken.Register(() =>
+            {
+                if (_instances.Remove(instance, out var entry))
+                {
+                    if (entry.Source == InstanceSource.Direct)
+                    {
+                        entry.AssetHandle?.Dispose();
+                    }
+                }
+            });
+
             return instance;
         }
 
-        /// <summary>
-        /// 异步实例化 GameObject（默认位置和旋转）。
-        /// </summary>
+        /// <summary>异步实例化 GameObject（默认位置和旋转）。</summary>
         public UniTask<GameObject> InstantiateAsync(string key, CancellationToken ct = default)
         {
             return InstantiateAsync(key, Vector3.zero, Quaternion.identity, ct);
         }
 
         /// <summary>
-        /// 释放实例化对象。池化对象回池，非池化对象销毁。
-        /// 不影响资源 handle 的引用计数——如需释放资源本身，调用 <see cref="UnloadAsset"/>。
+        /// 释放实例化对象。池化对象回池，非池化对象销毁 + 释放 AssetHandle。
+        /// 不影响资源 handle 的引用计数（如需释放资源本身，Dispose AssetHandle）。
         /// </summary>
         public void Release(GameObject instance)
         {
             if (instance == null)
             {
-                Debug.LogWarning("[ResMgr] Release called with null.");
+                Log.Warning("ResMgr", "Release called with null.");
                 return;
             }
 
-            // 非池化实例 → 销毁
-            if (_nonPooledInstances.Remove(instance, out var key))
+            if (_instances.TryGetValue(instance, out var entry))
             {
+                if (entry.Source == InstanceSource.Pool)
+                {
+                    GameGlobal.PoolMgr?.Release(instance);
+                }
+                else // Direct
+                {
+                    Object.Destroy(instance);
+                    entry.AssetHandle?.Dispose();
+                }
+                _instances.Remove(instance);
+            }
+            else
+            {
+                Log.Warning("ResMgr", $"Object '{instance.name}' is not managed by ResMgr, destroying.");
                 Object.Destroy(instance);
-                return;
             }
-
-            // 尝试走池（池化实例有 PooledObjectTracker）
-            if (instance.GetComponent<PooledObjectTracker>() != null)
-            {
-                GameGlobal.PoolMgr.Release(instance);
-                return;
-            }
-
-            // 既不在非池化字典中，也没有 Tracker
-            Debug.LogWarning($"[ResMgr] Object '{instance.name}' is not managed by ResMgr, destroying.");
-            Object.Destroy(instance);
         }
 
+        // ──────────────────────────────────────────────
+        //  场景原语
+        // ──────────────────────────────────────────────
+
         /// <summary>
-        /// 卸载已加载的资源 handle，释放内存。
-        /// 注意：确保所有基于该资源的实例已被 Release，否则可能产生空引用。
+        /// 异步加载场景，返回 SceneHandle。支持 Single/Additive 模式与 activateOnLoad。
         /// </summary>
-        public void UnloadAsset(string key)
+        public async UniTask<SceneHandle> LoadSceneAsync(
+            string key,
+            LoadSceneMode mode = LoadSceneMode.Single,
+            bool activateOnLoad = true,
+            IProgress<float> progress = null,
+            CancellationToken ct = default)
         {
-            if (_handles.TryGetValue(key, out var handle))
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentException("Scene key cannot be null or empty.", nameof(key));
+
+            await EnsureAddressablesInitialized();
+
+            var handle = Addressables.LoadSceneAsync(key, mode, activateOnLoad);
+            await handle.ToUniTask(cancellationToken: ct);
+
+            if (handle.Status != AsyncOperationStatus.Succeeded)
             {
-                Addressables.Release(handle);
-                _handles.Remove(key);
+                Log.Error("ResMgr", $"场景加载失败: '{key}': {handle.OperationException?.Message}");
+                throw new InvalidOperationException($"[ResMgr] Failed to load scene '{key}'");
             }
+
+            progress?.Report(1f);
+            return new SceneHandle(handle, activateOnLoad);
         }
 
-        /// <summary>
-        /// 批量预加载资源。
-        /// </summary>
-        /// <param name="keys">要预加载的资源 key 列表</param>
-        /// <param name="progress">可选的进度报告（0~1）</param>
+        // ──────────────────────────────────────────────
+        //  预加载
+        // ──────────────────────────────────────────────
+
+        /// <summary>批量预加载（按 key 列表）。</summary>
         public async UniTask PreloadAsync(
             IReadOnlyList<string> keys, IProgress<float> progress = null, CancellationToken ct = default)
         {
             if (keys == null || keys.Count == 0) return;
-
-            await EnsureAddressablesInitialized(ct);
+            await EnsureAddressablesInitialized();
 
             int completed = 0;
-
             await UniTask.WhenAll(keys.Select(async key =>
             {
-                if (_handles.ContainsKey(key)) return;
+                if (_entries.TryGetValue(key, out var existing) && existing.RefCount > 0) return;
 
                 var handle = Addressables.LoadAssetAsync<Object>(key);
-                _handles[key] = handle;
+                var entry = new AssetEntry
+                {
+                    Key = key,
+                    Handle = handle,
+                    RefCount = 1
+                };
+                entry.OnReleased = OnEntryReleased;
+                _entries[key] = entry;
                 await handle.ToUniTask(cancellationToken: ct);
 
                 completed++;
@@ -159,81 +238,140 @@ namespace PumpGF
             }));
         }
 
-        /// <summary>
-        /// 异步加载场景（Addressables）。
-        /// </summary>
-        public async UniTask LoadSceneAsync(string key, CancellationToken ct = default)
+        /// <summary>按 Addressables Label 批量预加载。</summary>
+        public async UniTask PreloadByLabelAsync(
+            string label, IProgress<float> progress = null, CancellationToken ct = default)
         {
-            await EnsureAddressablesInitialized(ct);
+            if (string.IsNullOrEmpty(label)) return;
+            await EnsureAddressablesInitialized();
 
-            var handle = Addressables.LoadSceneAsync(key, LoadSceneMode.Single);
-            await handle.ToUniTask(cancellationToken: ct);
+            var locations = Addressables.LoadResourceLocationsAsync(label);
+            await locations.ToUniTask(cancellationToken: ct);
+
+            if (locations.Status != AsyncOperationStatus.Succeeded || locations.Result == null) return;
+
+            var keys = new List<string>(locations.Result.Count);
+            foreach (var loc in locations.Result)
+            {
+                keys.Add(loc.PrimaryKey);
+            }
+
+            await PreloadAsync(keys, progress, ct);
         }
 
         // ──────────────────────────────────────────────
-        //  Resources 备用接口
+        //  查询 / 统计
         // ──────────────────────────────────────────────
 
-        /// <summary>
-        /// 通过 Resources.LoadAsync 加载资源（备用接口，不走 Addressables）。
-        /// 加载的资源不受 <see cref="UnloadAsset"/> 管理；如需卸载请调用 <see cref="Resources.UnloadAsset"/>。
-        /// </summary>
-        public async UniTask<T> LoadResourceAsync<T>(string path, CancellationToken ct = default) where T : Object
+        /// <summary>指定 key 的资源是否已加载（RefCount > 0）。</summary>
+        public bool IsAssetLoaded(string key)
         {
-            var req = await Resources.LoadAsync<T>(path).ToUniTask(cancellationToken: ct);
-            if (req == null)
-                throw new InvalidOperationException($"[ResMgr] Resources.Load failed: '{path}'");
-            return (T)req;
+            return _entries.TryGetValue(key, out var entry) && entry.RefCount > 0;
+        }
+
+        /// <summary>已加载资产数量。</summary>
+        public int LoadedAssetCount => _entries.Count;
+
+        /// <summary>池化实例数量。</summary>
+        public int PooledInstanceCount => _instances.Count(e => e.Value.Source == InstanceSource.Pool);
+
+        /// <summary>非池化实例数量。</summary>
+        public int DirectInstanceCount => _instances.Count(e => e.Value.Source == InstanceSource.Direct);
+
+        /// <summary>获取所有已加载资产信息（Debug 用）。</summary>
+        public IReadOnlyList<AssetInfo> GetLoadedAssetsInfo()
+        {
+            var list = new List<AssetInfo>(_entries.Count);
+            foreach (var kvp in _entries)
+            {
+                list.Add(new AssetInfo
+                {
+                    Key = kvp.Key,
+                    Type = kvp.Value.Result?.GetType(),
+                    RefCount = kvp.Value.RefCount,
+                });
+            }
+            return list;
         }
 
         // ──────────────────────────────────────────────
-        //  查询
+        //  内部
         // ──────────────────────────────────────────────
 
-        /// <summary>
-        /// 指定 key 的资源是否已加载。
-        /// </summary>
-        public bool IsAssetLoaded(string key) => _handles.ContainsKey(key);
+        private UniTask EnsureAddressablesInitialized()
+        {
+            return _initTask ??= InitCoreAsync();
+        }
 
-        /// <summary>
-        /// 当前已加载但未卸载的资源数量。
-        /// </summary>
-        public int LoadedAssetCount => _handles.Count;
+        private async UniTask InitCoreAsync()
+        {
+            var init = Addressables.InitializeAsync();
+            await init.ToUniTask();
+
+            if (init.Status != AsyncOperationStatus.Succeeded)
+            {
+                _initTask = default;
+                Log.Error("ResMgr", "Addressables 初始化失败。");
+                throw new InvalidOperationException("[ResMgr] Addressables initialization failed.");
+            }
+        }
+
+        private void OnEntryReleased(AssetEntry entry)
+        {
+            _entries.Remove(entry.Key);
+        }
 
         // ──────────────────────────────────────────────
-        //  生命周期
+        //  IModule.Dispose
         // ──────────────────────────────────────────────
 
         public void Dispose()
         {
             // 清理非池化实例
-            foreach (var kvp in _nonPooledInstances)
+            foreach (var kvp in _instances)
             {
-                if (kvp.Key != null) Object.Destroy(kvp.Key);
+                if (kvp.Key == null) continue;
+                if (kvp.Value.Source == InstanceSource.Direct)
+                {
+                    kvp.Value.AssetHandle?.Dispose();
+                    Object.Destroy(kvp.Key);
+                }
             }
-            _nonPooledInstances.Clear();
+            _instances.Clear();
 
-            // 释放所有 Addressables handle
-            foreach (var handle in _handles.Values)
+            // 释放所有 AssetEntry
+            foreach (var entry in _entries.Values)
             {
-                Addressables.Release(handle);
+                if (entry.RefCount > 0 && entry.Handle.IsValid())
+                {
+                    Addressables.Release(entry.Handle);
+                }
             }
-            _handles.Clear();
+            _entries.Clear();
+            _initTask = default;
         }
 
-        async UniTask EnsureAddressablesInitialized(CancellationToken ct)
+        // ── 内部类型 ──
+
+        private enum InstanceSource { Pool, Direct }
+
+        private struct InstanceEntry
         {
-            if (_addressablesReady) return;
-            _addressablesReady = true;
-
-            var init = Addressables.InitializeAsync();
-            await init.ToUniTask(cancellationToken: ct);
-
-            if (init.Status != AsyncOperationStatus.Succeeded)
-            {
-                _addressablesReady = false;
-                throw new InvalidOperationException("[ResMgr] Addressables initialization failed.");
-            }
+            public InstanceSource Source;
+            public AssetHandle<GameObject> AssetHandle; // 仅 Direct 模式持有
         }
+    }
+
+    /// <summary>
+    /// 已加载资产信息（Debug 用）。
+    /// </summary>
+    public struct AssetInfo
+    {
+        /// <summary>Addressables key</summary>
+        public string Key;
+        /// <summary>资源类型</summary>
+        public Type Type;
+        /// <summary>当前引用计数</summary>
+        public int RefCount;
     }
 }

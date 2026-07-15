@@ -5,6 +5,8 @@
     "unity": "2021.3",
     "description": "A reliable, portable Unity game development framework.",
     "dependencies": {
-        "com.unity.addressables": "1.21.21"
+        "com.unity.addressables": "1.21.21",
+        "com.unity.inputsystem": "1.7.0",
+        "com.unity.cinemachine": "2.10.3"
     }
 }
