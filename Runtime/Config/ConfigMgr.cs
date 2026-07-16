@@ -1,7 +1,9 @@
 using System;
 using System.Threading;
 using System.Collections.Generic;
+using System.Linq;
 using Cysharp.Threading.Tasks;
+using Interlocked = System.Threading.Interlocked;
 
 namespace PumpGF
 {
@@ -75,15 +77,17 @@ namespace PumpGF
             if (keys == null || keys.Count == 0) return;
 
             int completed = 0;
-            foreach (var key in keys)
+            int total = keys.Count;
+            // 并发加载：多个 IO/Addressables 请求同时进行，进度用 Interlocked 保序
+            await UniTask.WhenAll(keys.Select(async key =>
             {
                 if (!_cache.ContainsKey(key))
                 {
                     await GetAsync<object>(key, ct);
                 }
-                completed++;
-                progress?.Report((float)completed / keys.Count);
-            }
+                var done = Interlocked.Increment(ref completed);
+                progress?.Report((float)done / total);
+            }));
         }
 
         // ──────────────────────────────────────────────

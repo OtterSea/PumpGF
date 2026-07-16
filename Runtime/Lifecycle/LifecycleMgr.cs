@@ -49,6 +49,8 @@ namespace PumpGF
         }
         private readonly List<PauseEntry> _pauseStack = new();
         private UpdateChannel _frozenMask;
+        // 通道暂停状态变化推送（P1-2）
+        private readonly Dictionary<UpdateChannel, Subject<bool>> _pauseSubjects = new();
 
         // ── 场景钩子 ──
         private readonly Subject<Scene> _onSceneLoaded = new();
@@ -180,20 +182,39 @@ namespace PumpGF
             return (_frozenMask & channel) != 0;
         }
 
-        /// <summary>通道暂停状态变化流</summary>
+        /// <summary>
+        /// 通道暂停状态变化流。发出 true=当前已暂停 / false=当前未暂停。
+        /// 语义严格来自 PushPause/PopPause，与 TimeScale 无关。
+        /// </summary>
         public Observable<bool> ObserveChannelPaused(UpdateChannel channel)
         {
-            // TODO: 优化为专门的 Subject 跟踪暂停状态变化
-            // 当前简化：返回 GetUpdateObservable 的派生（dt == 0 表示暂停）
-            return GetUpdateObservable(channel).Select(dt => dt > 0f).DistinctUntilChanged();
+            if (!_pauseSubjects.TryGetValue(channel, out var subject))
+            {
+                subject = new Subject<bool>();
+                _pauseSubjects[channel] = subject;
+            }
+            return subject;
         }
 
         private void RecalculateFrozenMask()
         {
+            var previous = _frozenMask;
             _frozenMask = 0;
             foreach (var entry in _pauseStack)
             {
                 _frozenMask |= entry.PausedChannels;
+            }
+
+            if (previous == _frozenMask || _pauseSubjects.Count == 0) return;
+
+            // 逐位比较变化的通道位，仅对状态变化的通道推送
+            var changed = previous ^ _frozenMask;
+            foreach (var kvp in _pauseSubjects)
+            {
+                if ((changed & kvp.Key) != 0)
+                {
+                    kvp.Value.OnNext((_frozenMask & kvp.Key) != 0);
+                }
             }
         }
 
@@ -436,6 +457,10 @@ namespace PumpGF
             foreach (var kvp in _updateSubjects)
                 kvp.Value.Dispose();
             _updateSubjects.Clear();
+
+            foreach (var kvp in _pauseSubjects)
+                kvp.Value.Dispose();
+            _pauseSubjects.Clear();
 
             _fixedUpdateSubject.Dispose();
             _lateUpdateSubject.Dispose();

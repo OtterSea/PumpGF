@@ -8,6 +8,7 @@ using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
+using Interlocked = System.Threading.Interlocked;
 
 namespace PumpGF
 {
@@ -220,9 +221,15 @@ namespace PumpGF
             await EnsureAddressablesInitialized();
 
             int completed = 0;
+            int total = keys.Count;
             await UniTask.WhenAll(keys.Select(async key =>
             {
-                if (_entries.TryGetValue(key, out var existing) && existing.RefCount > 0) return;
+                if (_entries.TryGetValue(key, out var existing) && existing.RefCount > 0)
+                {
+                    var done = Interlocked.Increment(ref completed);
+                    progress?.Report((float)done / total);
+                    return;
+                }
 
                 var handle = Addressables.LoadAssetAsync<Object>(key);
                 var entry = new AssetEntry
@@ -235,8 +242,9 @@ namespace PumpGF
                 _entries[key] = entry;
                 await handle.ToUniTask(cancellationToken: ct);
 
-                completed++;
-                progress?.Report((float)completed / keys.Count);
+                // 并发安全递增，防止多协程并发丢失进度
+                var doneCount = Interlocked.Increment(ref completed);
+                progress?.Report((float)doneCount / total);
             }));
         }
 

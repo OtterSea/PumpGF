@@ -80,8 +80,10 @@ namespace PumpGF
         }
 
         /// <summary>
-        /// 订阅事件（防闭包版本）。显式传入 state，避免 lambda 闭包分配。
-        /// 热路径推荐使用。
+        /// 订阅事件（低闭包版本）。显式传入 state，通过自定义 Observer 承载 state + handler 引用，
+        /// 避免为每次 Publish 分配捕获 <c>state</c> 与 <c>handler</c> 的 lambda 闭包。
+        /// <para>说明：仍会为订阅本身分配 1 个 <see cref="StateObserver{TEvent,TState}"/> 对象；
+        /// 但相比 <see cref="Subscribe{TEvent}(Action{TEvent})"/> + 闭包 lambda，热路径的 GC 更可控。</para>
         /// </summary>
         public IDisposable SubscribeWithState<TEvent, TState>(
             TState state, Action<TState, TEvent> handler)
@@ -89,8 +91,31 @@ namespace PumpGF
         {
             if (handler == null) throw new ArgumentNullException(nameof(handler));
             var subject = GetOrCreateSubject<TEvent>();
-            // TODO: 优化为 R3 的 Subscribe(state, action) 零闭包重载（若 R3 支持）
-            return subject.Subscribe(e => handler(state, e));
+            var observer = new StateObserver<TEvent, TState>(state, handler);
+            return subject.Subscribe(observer);
+        }
+
+        /// <summary>
+        /// 承载 state + handler 的自定义观察者，避免 lambda 每次派发时闭包分配。
+        /// </summary>
+        private sealed class StateObserver<TEvent, TState> : Observer<TEvent>
+            where TEvent : struct
+        {
+            private readonly TState _state;
+            private readonly Action<TState, TEvent> _handler;
+
+            public StateObserver(TState state, Action<TState, TEvent> handler)
+            {
+                _state = state;
+                _handler = handler;
+            }
+
+            protected override void OnNextCore(TEvent value) => _handler(_state, value);
+            protected override void OnErrorResumeCore(Exception error)
+            {
+                Log.Error("EventBus", $"StateObserver OnErrorResume: {error.Message}");
+            }
+            protected override void OnCompletedCore(Result result) { /* 事件流不常 Completed */ }
         }
 
         /// <summary>

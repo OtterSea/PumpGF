@@ -15,10 +15,16 @@ namespace PumpGF
     {
         // 命令条目（#if DEBUG 内使用）
         private readonly Dictionary<string, CommandEntry> _commands = new();
-        private readonly List<string> _history = new(32);
-        private readonly List<string> _consoleLog = new(64);
+        // 环形历史 / 日志缓冲（Queue 均摊 O(1)，避免 List.RemoveAt(0) 的 O(n)）
+        private readonly Queue<string> _history = new(64);
+        private readonly Queue<string> _consoleLog = new(256);
+        private const int HistoryMax = 64;
+        private const int ConsoleLogMax = 200;
         private readonly List<IDebugPanel> _panels = new(4);
         private readonly List<IGizmosDrawable> _gizmos = new(8);
+        // 用于对外暴露的快照缓冲（避免 IReadOnlyList<T> 每次都新建）
+        private readonly List<string> _historyView = new(64);
+        private readonly List<string> _consoleLogView = new(256);
 
         public DebugConsoleConfig Config { get; set; } = new();
         public bool GizmosEnabled { get; set; } = true;
@@ -61,8 +67,8 @@ namespace PumpGF
         public void Execute(string commandLine)
         {
             if (string.IsNullOrWhiteSpace(commandLine)) return;
-            _history.Add(commandLine);
-            if (_history.Count > 64) _history.RemoveAt(0);
+            if (_history.Count >= HistoryMax) _history.Dequeue();
+            _history.Enqueue(commandLine);
             AppendLog("> " + commandLine);
 
             var parts = commandLine.Trim().Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
@@ -113,22 +119,35 @@ namespace PumpGF
             return list;
         }
 
-        public IReadOnlyList<string> GetCommandHistory() => _history;
-        public IReadOnlyList<string> GetConsoleLog() => _consoleLog;
+        public IReadOnlyList<string> GetCommandHistory()
+        {
+            _historyView.Clear();
+            _historyView.AddRange(_history);
+            return _historyView;
+        }
+
+        public IReadOnlyList<string> GetConsoleLog()
+        {
+            _consoleLogView.Clear();
+            _consoleLogView.AddRange(_consoleLog);
+            return _consoleLogView;
+        }
 
         internal string GetPreviousHistory(ref int index)
         {
             if (_history.Count == 0) return "";
-            if (index < 0) index = _history.Count;
+            var snapshot = GetCommandHistory();
+            if (index < 0) index = snapshot.Count;
             index = Mathf.Max(0, index - 1);
-            return index < _history.Count ? _history[index] : "";
+            return index < snapshot.Count ? snapshot[index] : "";
         }
 
         internal string GetNextHistory(ref int index)
         {
             if (_history.Count == 0) return "";
-            index = Mathf.Min(_history.Count, index + 1);
-            return index < _history.Count ? _history[index] : "";
+            var snapshot = GetCommandHistory();
+            index = Mathf.Min(snapshot.Count, index + 1);
+            return index < snapshot.Count ? snapshot[index] : "";
         }
 
         // ── 面板 ──
@@ -243,8 +262,8 @@ namespace PumpGF
 
         private void AppendLog(string line)
         {
-            _consoleLog.Add(line);
-            if (_consoleLog.Count > 200) _consoleLog.RemoveAt(0);
+            if (_consoleLog.Count >= ConsoleLogMax) _consoleLog.Dequeue();
+            _consoleLog.Enqueue(line);
         }
 
         private struct CommandEntry

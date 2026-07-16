@@ -1,5 +1,8 @@
 using System;
+using System.IO;
 using System.Text;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 
 namespace PumpGF
@@ -11,6 +14,84 @@ namespace PumpGF
     {
         byte[] Serialize<T>(T data);
         T Deserialize<T>(byte[] bytes);
+    }
+
+    /// <summary>
+    /// 存储后端抽象。默认基于 <see cref="File"/> 的实现覆盖 PC/Mobile/Editor；
+    /// 未来 WebGL / 主机平台可实现 PlayerPrefs / 平台专属 API 后端。
+    /// </summary>
+    public interface IStorageBackend
+    {
+        /// <summary>文件是否存在</summary>
+        bool Exists(string path);
+        /// <summary>删除文件（不存在时静默）</summary>
+        void Delete(string path);
+        /// <summary>确保所在目录存在</summary>
+        void EnsureDirectory(string dir);
+        /// <summary>移动 srcPath → dstPath（srcPath 必须存在，dstPath 必须不存在，调用方保证）</summary>
+        void Move(string srcPath, string dstPath);
+        /// <summary>异步读取全部字节；文件不存在返回 null（不抛异常）</summary>
+        UniTask<byte[]> ReadAllBytesAsync(string path, CancellationToken ct = default);
+        /// <summary>异步写入字节（覆盖）</summary>
+        UniTask WriteAllBytesAsync(string path, byte[] bytes, CancellationToken ct = default);
+        /// <summary>同步读取文本（用于 meta.json 小文件）</summary>
+        string ReadAllText(string path);
+        /// <summary>同步写入文本（用于 meta.json 小文件）</summary>
+        void WriteAllText(string path, string content);
+        /// <summary>删除目录（递归）</summary>
+        void DeleteDirectory(string dir);
+    }
+
+    /// <summary>
+    /// 默认文件系统存储后端。基于 <see cref="System.IO.File"/> API + 线程池异步。
+    /// 单机 PC / Mobile 平台适用；WebGL 请自行实现 PlayerPrefs 版本。
+    /// </summary>
+    public sealed class FileStorageBackend : IStorageBackend
+    {
+        public bool Exists(string path) => File.Exists(path);
+
+        public void Delete(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (Exception e) { Log.Warning("StorageBackend", $"Delete '{path}' 失败: {e.Message}"); }
+        }
+
+        public void EnsureDirectory(string dir)
+        {
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        }
+
+        public void Move(string srcPath, string dstPath) => File.Move(srcPath, dstPath);
+
+        public async UniTask<byte[]> ReadAllBytesAsync(string path, CancellationToken ct = default)
+        {
+            try
+            {
+                return await UniTask.RunOnThreadPool(() => File.ReadAllBytes(path), cancellationToken: ct);
+            }
+            catch (FileNotFoundException)
+            {
+                return null;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return null;
+            }
+        }
+
+        public UniTask WriteAllBytesAsync(string path, byte[] bytes, CancellationToken ct = default)
+        {
+            return UniTask.RunOnThreadPool(() => File.WriteAllBytes(path, bytes), cancellationToken: ct);
+        }
+
+        public string ReadAllText(string path) => File.ReadAllText(path);
+
+        public void WriteAllText(string path, string content) => File.WriteAllText(path, content);
+
+        public void DeleteDirectory(string dir)
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
     }
 
     /// <summary>

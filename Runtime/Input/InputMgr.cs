@@ -37,6 +37,14 @@ namespace PumpGF
         private readonly Dictionary<string, ReadOnlyReactiveProperty<Vector2>> _axisRO = new(16);
         private readonly Dictionary<string, ReadOnlyReactiveProperty<float>> _triggerRO = new(16);
 
+        // 委托绑定记录：Dispose/换 Asset 时需反注册以防泄漏
+        // 结构：(action, performedHandler, canceledHandler) 或 subject 缓存对应的 handler
+        private readonly List<(InputAction Action, Action<InputAction.CallbackContext> Performed, Action<InputAction.CallbackContext> Canceled)> _bindingCallbacks =
+            new(48);
+        // Subject → (action, event 类型, handler)：便于 Dispose 时反注册
+        private readonly List<(InputAction Action, InputEventKind Kind, Action<InputAction.CallbackContext> Handler)> _subjectCallbacks =
+            new(48);
+
         // 输入缓冲
         private InputBuffer _buffer;
         private bool _autoBuffer;
@@ -63,6 +71,9 @@ namespace PumpGF
             _contextStack.Clear();
             _globalMap = null;
 
+            // 反注册所有 InputAction 事件回调，避免 lambda 泄漏
+            UnregisterAllCallbacks();
+
             foreach (var kvp in _performedSubjects) kvp.Value.Dispose();
             foreach (var kvp in _startedSubjects) kvp.Value.Dispose();
             foreach (var kvp in _canceledSubjects) kvp.Value.Dispose();
@@ -84,13 +95,60 @@ namespace PumpGF
             _asset = null;
         }
 
+        private void UnregisterAllCallbacks()
+        {
+            for (int i = 0; i < _bindingCallbacks.Count; i++)
+            {
+                var (action, performed, canceled) = _bindingCallbacks[i];
+                if (action != null)
+                {
+                    if (performed != null) action.performed -= performed;
+                    if (canceled != null) action.canceled -= canceled;
+                }
+            }
+            _bindingCallbacks.Clear();
+
+            for (int i = 0; i < _subjectCallbacks.Count; i++)
+            {
+                var (action, kind, handler) = _subjectCallbacks[i];
+                if (action == null || handler == null) continue;
+                switch (kind)
+                {
+                    case InputEventKind.Performed: action.performed -= handler; break;
+                    case InputEventKind.Started:   action.started -= handler; break;
+                    case InputEventKind.Canceled:  action.canceled -= handler; break;
+                }
+            }
+            _subjectCallbacks.Clear();
+        }
+
         // ──────────────────────────────────────────────
         //  资产注入
         // ──────────────────────────────────────────────
 
         /// <summary>注入 InputActionAsset（业务外部加载后传入）。注入后启用 Global ActionMap。</summary>
+        /// <remarks>换 Asset 时会自动反注册旧 Asset 上的所有回调，避免泄漏与陈旧引用。</remarks>
         public void SetInputActionAsset(InputActionAsset asset)
         {
+            if (_asset != null && _asset != asset)
+            {
+                // 反注册旧 Asset 上残留的委托，清空 R3 缓存
+                UnregisterAllCallbacks();
+                foreach (var kvp in _performedSubjects) kvp.Value.Dispose();
+                foreach (var kvp in _startedSubjects) kvp.Value.Dispose();
+                foreach (var kvp in _canceledSubjects) kvp.Value.Dispose();
+                _performedSubjects.Clear();
+                _startedSubjects.Clear();
+                _canceledSubjects.Clear();
+
+                foreach (var kvp in _buttonRO) kvp.Value.Dispose();
+                foreach (var kvp in _axisRO) kvp.Value.Dispose();
+                foreach (var kvp in _triggerRO) kvp.Value.Dispose();
+                _buttonRO.Clear();
+                _axisRO.Clear();
+                _triggerRO.Clear();
+            }
+
             _asset = asset;
             if (_asset != null)
             {
@@ -181,22 +239,19 @@ namespace PumpGF
         /// <summary>动作执行时触发（按键按下瞬间）</summary>
         public Observable<InputAction.CallbackContext> OnActionPerformed(string actionName)
         {
-            return GetOrCreateSubject(actionName, _performedSubjects,
-                (action, handler) => action.performed += handler);
+            return GetOrCreateSubject(actionName, _performedSubjects, InputEventKind.Performed);
         }
 
         /// <summary>动作开始</summary>
         public Observable<InputAction.CallbackContext> OnActionStarted(string actionName)
         {
-            return GetOrCreateSubject(actionName, _startedSubjects,
-                (action, handler) => action.started += handler);
+            return GetOrCreateSubject(actionName, _startedSubjects, InputEventKind.Started);
         }
 
         /// <summary>动作取消（按键抬起）</summary>
         public Observable<InputAction.CallbackContext> OnActionCanceled(string actionName)
         {
-            return GetOrCreateSubject(actionName, _canceledSubjects,
-                (action, handler) => action.canceled += handler);
+            return GetOrCreateSubject(actionName, _canceledSubjects, InputEventKind.Canceled);
         }
 
         // ──────────────────────────────────────────────
@@ -211,8 +266,11 @@ namespace PumpGF
             var prop = new ReactiveProperty<bool>(action != null && action.IsPressed());
             if (action != null)
             {
-                action.performed += ctx => prop.Value = true;
-                action.canceled += ctx => prop.Value = false;
+                Action<InputAction.CallbackContext> onPerformed = ctx => prop.Value = true;
+                Action<InputAction.CallbackContext> onCanceled = ctx => prop.Value = false;
+                action.performed += onPerformed;
+                action.canceled += onCanceled;
+                _bindingCallbacks.Add((action, onPerformed, onCanceled));
             }
             else LogWarningMissing(actionName);
             var roProp = prop.ToReadOnlyReactiveProperty();
@@ -228,8 +286,11 @@ namespace PumpGF
             var prop = new ReactiveProperty<Vector2>(action != null ? action.ReadValue<Vector2>() : Vector2.zero);
             if (action != null)
             {
-                action.performed += ctx => prop.Value = ctx.ReadValue<Vector2>();
-                action.canceled += ctx => prop.Value = Vector2.zero;
+                Action<InputAction.CallbackContext> onPerformed = ctx => prop.Value = ctx.ReadValue<Vector2>();
+                Action<InputAction.CallbackContext> onCanceled = ctx => prop.Value = Vector2.zero;
+                action.performed += onPerformed;
+                action.canceled += onCanceled;
+                _bindingCallbacks.Add((action, onPerformed, onCanceled));
             }
             else LogWarningMissing(actionName);
             var roProp = prop.ToReadOnlyReactiveProperty();
@@ -245,8 +306,11 @@ namespace PumpGF
             var prop = new ReactiveProperty<float>(action != null ? action.ReadValue<float>() : 0f);
             if (action != null)
             {
-                action.performed += ctx => prop.Value = ctx.ReadValue<float>();
-                action.canceled += ctx => prop.Value = 0f;
+                Action<InputAction.CallbackContext> onPerformed = ctx => prop.Value = ctx.ReadValue<float>();
+                Action<InputAction.CallbackContext> onCanceled = ctx => prop.Value = 0f;
+                action.performed += onPerformed;
+                action.canceled += onCanceled;
+                _bindingCallbacks.Add((action, onPerformed, onCanceled));
             }
             else LogWarningMissing(actionName);
             var roProp = prop.ToReadOnlyReactiveProperty();
@@ -392,7 +456,7 @@ namespace PumpGF
         private Subject<InputAction.CallbackContext> GetOrCreateSubject(
             string actionName,
             Dictionary<string, Subject<InputAction.CallbackContext>> cache,
-            Action<InputAction, Action<InputAction.CallbackContext>> register)
+            InputEventKind kind)
         {
             if (cache.TryGetValue(actionName, out var existing)) return existing;
 
@@ -400,11 +464,18 @@ namespace PumpGF
             var action = FindAction(actionName);
             if (action != null)
             {
-                register(action, ctx =>
+                Action<InputAction.CallbackContext> handler = ctx =>
                 {
                     subject.OnNext(ctx);
                     if (_autoBuffer) BufferInput(actionName);
-                });
+                };
+                switch (kind)
+                {
+                    case InputEventKind.Performed: action.performed += handler; break;
+                    case InputEventKind.Started:   action.started += handler; break;
+                    case InputEventKind.Canceled:  action.canceled += handler; break;
+                }
+                _subjectCallbacks.Add((action, kind, handler));
             }
             else
             {
@@ -413,6 +484,8 @@ namespace PumpGF
             cache[actionName] = subject;
             return subject;
         }
+
+        private enum InputEventKind { Performed, Started, Canceled }
 
         private static void LogWarningMissing(string actionName)
         {

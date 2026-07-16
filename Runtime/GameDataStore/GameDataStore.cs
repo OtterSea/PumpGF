@@ -96,9 +96,11 @@ namespace PumpGF
             if (_handlers.TryGetValue(type, out var handler))
             {
 #if DEBUG
-                _history.Add(new CommandHistoryEntry(type, command, DateTime.Now));
-                if (_history.Count > _historyLimit)
+                // 用环形逻辑：仅在 DEBUG 构建记录，且用 List 但用尾进头出。
+                // 用 List 保留因 API 兼容；参见 P2-9 备注。
+                if (_history.Count >= _historyLimit)
                     _history.RemoveAt(0);
+                _history.Add(new CommandHistoryEntry(type, command, DateTime.Now));
 #endif
                 handler(command);
             }
@@ -115,11 +117,20 @@ namespace PumpGF
         }
 
         // ──────────────────────────────────────────────
-        //  Command 历史（Debug）
+        //  Command 历史（Debug 专用，Release 包为空）
         // ──────────────────────────────────────────────
 
-        /// <summary>获取 Command 历史（Debug 面板用）</summary>
-        public IReadOnlyList<CommandHistoryEntry> GetCommandHistory() => _history;
+        /// <summary>
+        /// 获取 Command 历史（Debug 面板用）。
+        /// <b>注意</b>：仅在 DEBUG 构建下有效，Release 包始终返回空列表。
+        /// </summary>
+        public IReadOnlyList<CommandHistoryEntry> GetCommandHistory()
+        {
+#if !DEBUG
+            Log.Warning("GameDataStore", "GetCommandHistory 在 Release 构建下不记录数据，返回空列表。");
+#endif
+            return _history;
+        }
 
         /// <summary>清空 Command 历史</summary>
         public void ClearCommandHistory() => _history.Clear();

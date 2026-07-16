@@ -203,7 +203,7 @@ namespace PumpGF
                 _bgmFadeTween?.Kill();
                 _bgmFadeTween = _bgmSource.DOFade(0f, _fadeOutDuration);
                 try { await _bgmFadeTween.ToUniTask(cancellationToken: ct); }
-                catch (OperationCanceledException) { throw; }
+                catch (OperationCanceledException) { return; } // UniTaskVoid：吞 OCE，不污染日志
                 catch (Exception e) { Log.Error("AudioMgr", $"BGM 淡出异常: {e.Message}"); }
                 _bgmSource.Stop();
                 ReleaseBgmClip();
@@ -214,7 +214,7 @@ namespace PumpGF
             {
                 _bgmClipHandle = await _resMgr.LoadAssetAsync<AudioClip>(entry.AddressablesKey, ct: ct);
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) { return; }
             catch (Exception e)
             {
                 Log.Error("AudioMgr", $"BGM 加载失败 '{entry.Key}': {e.Message}");
@@ -235,7 +235,7 @@ namespace PumpGF
             _bgmFadeTween?.Kill();
             _bgmFadeTween = _bgmSource.DOFade(targetVol, _fadeInDuration);
             try { await _bgmFadeTween.ToUniTask(cancellationToken: ct); }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) { return; }
             catch (Exception e) { Log.Error("AudioMgr", $"BGM 淡入异常: {e.Message}"); }
 
             Log.Info("AudioMgr", $"BGM 播放: {entry.Key}");
@@ -248,7 +248,7 @@ namespace PumpGF
             _bgmFadeTween?.Kill();
             _bgmFadeTween = _bgmSource.DOFade(0f, fadeOut);
             try { await _bgmFadeTween.ToUniTask(cancellationToken: ct); }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) { return; } // UniTaskVoid：吞 OCE
             catch (Exception e) { Log.Error("AudioMgr", $"BGM 停止淡出异常: {e.Message}"); }
             _bgmSource.Stop();
             ReleaseBgmClip();
@@ -325,7 +325,11 @@ namespace PumpGF
                 if (inst.Released) return; // 加载期间已被停止
                 StartSfxPlay(inst, handle);
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException)
+            {
+                // UniTaskVoid 中吞 OCE，防止污染 UniTaskScheduler.UnobservedTaskException
+                ReleaseSfx(inst);
+            }
             catch (Exception e)
             {
                 Log.Error("AudioMgr", $"SFX 加载失败 '{inst.Entry.Key}': {e.Message}");

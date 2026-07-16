@@ -40,10 +40,52 @@ namespace PumpGF
         /// <summary>是否拥有指定组件</summary>
         public bool Has<T>() where T : IComponent => _components.ContainsKey(typeof(T));
 
+        /// <summary>是否拥有指定组件（别名：<see cref="Has{T}"/>）</summary>
+        public bool HasComponent<T>() where T : IComponent => _components.ContainsKey(typeof(T));
+
         /// <summary>获取双组件</summary>
         public (T1, T2) Get<T1, T2>() where T1 : IComponent where T2 : IComponent
         {
             return (Get<T1>(), Get<T2>());
+        }
+
+        /// <summary>
+        /// 获取组件，若不存在则创建并注册（需要 <typeparamref name="T"/> 有无参构造）。
+        /// 业务常见的 <c>if (e.Get&lt;X&gt;() == null) e.Add&lt;X&gt;()</c> 简写为 <c>e.GetOrAdd&lt;X&gt;()</c>。
+        /// </summary>
+        public T GetOrAdd<T>() where T : class, IComponent, new()
+        {
+            if (_components.TryGetValue(typeof(T), out var existing))
+                return (T)existing;
+            var c = new T();
+            _components[typeof(T)] = c;
+            Manager?.OnComponentAdded(this, typeof(T));
+            return c;
+        }
+
+        /// <summary>获取组件，不存在则通过工厂创建并注册（用于无无参构造的类型）</summary>
+        public T GetOrAdd<T>(Func<T> factory) where T : class, IComponent
+        {
+            if (_components.TryGetValue(typeof(T), out var existing))
+                return (T)existing;
+            if (factory == null) throw new ArgumentNullException(nameof(factory));
+            var c = factory();
+            if (c == null) throw new InvalidOperationException("factory returned null");
+            _components[typeof(T)] = c;
+            Manager?.OnComponentAdded(this, typeof(T));
+            return c;
+        }
+
+        /// <summary>TryGet 语义（避免 null 检查歧义，struct 组件也能安全查询）</summary>
+        public bool TryGet<T>(out T component) where T : IComponent
+        {
+            if (_components.TryGetValue(typeof(T), out var c))
+            {
+                component = (T)c;
+                return true;
+            }
+            component = default;
+            return false;
         }
 
         /// <summary>添加组件实例</summary>

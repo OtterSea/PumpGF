@@ -25,11 +25,14 @@ namespace PumpGF
         private string _currentLevelKey;
         private IDisposable _updateSub;
         private bool _isLoading;
+        // 缓存 Tick 委托，避免每次 LoadLevelAsync 分配闭包
+        private Action<float> _levelTickDelegate;
 
         public void Init()
         {
             _resMgr = GameGlobal.ResMgr;
             _lifecycle = GameGlobal.LifecycleMgr;
+            _levelTickDelegate = OnCurrentLevelTick;
         }
 
         public void Dispose()
@@ -39,7 +42,10 @@ namespace PumpGF
 
             if (_currentLevel != null)
             {
-                _ = _currentLevel.OnExitAsync(default).ContinueWith(() => { });
+                // 同步 Forget（不 await 但显式声明 fire-and-forget，异常上抛给 UniTaskScheduler）
+                // 说明：Dispose 阶段（Application.quitting）无法 await 异步，业务需要持久化的应用
+                // 应挂 Application.wantsToQuit 或在 LevelManager.UnloadCurrentLevelAsync 里手动 await。
+                SafeExitFireAndForget(_currentLevel).Forget();
                 _currentLevel = null;
                 _currentLevelKey = null;
             }
@@ -52,6 +58,19 @@ namespace PumpGF
             _additiveScenes.Clear();
             _levelFactories.Clear();
             _isLoading = false;
+        }
+
+        private static async UniTaskVoid SafeExitFireAndForget(ILevel level)
+        {
+            try
+            {
+                await level.OnExitAsync(default);
+            }
+            catch (OperationCanceledException) { /* 应用退出正常取消，吞掉 */ }
+            catch (Exception e)
+            {
+                Log.Warning("LevelManager", $"Dispose 阶段关卡 OnExit 异常（已忽略）: {e.Message}");
+            }
         }
 
         // ──────────────────────────────────────────────
@@ -121,8 +140,8 @@ namespace PumpGF
                 _currentLevel = level;
                 _currentLevelKey = key;
 
-                // 绑定 Update
-                _updateSub = _lifecycle.RegisterTick(updateChannel, dt => _currentLevel.OnUpdate(dt));
+                // 绑定 Update（使用缓存委托，避免闭包分配）
+                _updateSub = _lifecycle.RegisterTick(updateChannel, _levelTickDelegate);
 
                 if (transition != null)
                     await transition.PlayFadeIn(ct);
@@ -212,6 +231,13 @@ namespace PumpGF
             {
                 Log.Error("LevelManager", $"关卡退出异常: {e}");
             }
+        }
+
+        // 缓存的 Tick 转发函数，安全处理关卡切换瞬间 _currentLevel 变化
+        private void OnCurrentLevelTick(float dt)
+        {
+            var level = _currentLevel;
+            if (level != null) level.OnUpdate(dt);
         }
     }
 }

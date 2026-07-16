@@ -135,6 +135,36 @@ namespace PumpGF
                 .AddTo(ref Bag);
         }
 
+        /// <summary>
+        /// 通用绑定：将 <typeparamref name="T"/> 属性变化通过 <paramref name="setter"/> 应用到 UI 目标。
+        /// 可用于 Image.color、Image.fillAmount、Dropdown.value、InputField.text 等任意场景。
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// Bind(vm.HpColor, hpImage, (img, c) => img.color = c);
+        /// Bind(vm.Fill, hpImage, (img, f) => img.fillAmount = f);
+        /// </code>
+        /// </example>
+        protected IDisposable Bind<T, TTarget>(
+            ReadOnlyReactiveProperty<T> prop, TTarget target, Action<TTarget, T> setter)
+            where TTarget : class
+        {
+            if (setter == null) throw new ArgumentNullException(nameof(setter));
+            return prop.Subscribe(v => setter(target, v)).AddTo(ref Bag);
+        }
+
+        /// <summary>绑定颜色到 Graphic（Image / RawImage / Text 等的 color）</summary>
+        protected IDisposable BindColor(ReadOnlyReactiveProperty<Color> prop, Graphic target)
+        {
+            return prop.Subscribe(c => target.color = c).AddTo(ref Bag);
+        }
+
+        /// <summary>绑定 float 到 Image.fillAmount（进度条常用）</summary>
+        protected IDisposable BindFillAmount(ReadOnlyReactiveProperty<float> prop, Image image)
+        {
+            return prop.Subscribe(v => image.fillAmount = v).AddTo(ref Bag);
+        }
+
         // ──────────────────────────────────────────────
         //  Auto_ 命名查找（基础能力，无需 Inspector 拖拽）
         // ──────────────────────────────────────────────

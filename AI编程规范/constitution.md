@@ -5,6 +5,25 @@
 
 ---
 
+## 0. 环境前提（AI 生成代码前必读）
+
+> **⚠️ 本框架仅支持 Unity 2022.2+ / 团结引擎 1.9.x（基于 2022 LTS）。**
+> 在 Unity 2021 或更早版本生成代码会产生大规模兼容性错误。
+
+生成代码时可安全使用的 API（Unity 2022.2+ 特性）：
+- `Component.destroyCancellationToken` / `GameObject.destroyCancellationToken`
+- `Dictionary<K,V>.Remove(key, out value)`（.NET Standard 2.1）
+- C# 9 语法（target-typed new、record、init-only 等）
+
+**类型体系约束（不要混淆）：**
+- 事件流对外暴露 → 用 `R3.Observable<T>`（**不是** `System.IObservable<T>`）
+- 响应式属性 → 用 `R3.ReactiveProperty<T>` / `R3.ReadOnlyReactiveProperty<T>`
+- 异步 → 用 `UniTask` / `UniTaskVoid`（**不是** `Task` / `async void`）
+
+**常见坑清单**：详见 [`README.md#已知坑合集`](../README.md#已知坑合集踩过的雷)。
+
+---
+
 ## 1. 框架定位
 
 PumpGF 是可迁移的 Unity 游戏开发代码框架，补全引擎缺失的工程化能力。AI 编码时应**优先使用框架模块**，不重复造轮子。

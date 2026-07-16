@@ -35,7 +35,7 @@ namespace PumpGF
         {
             if (_pools.ContainsKey(key))
             {
-                Debug.LogWarning($"[PoolMgr] Pool '{key}' already registered, skipping.");
+                Log.Warning("PoolMgr", $"Pool '{key}' already registered, skipping.");
                 return;
             }
 
@@ -98,14 +98,14 @@ namespace PumpGF
         {
             if (obj == null)
             {
-                Debug.LogWarning("[PoolMgr] Release called with null.");
+                Log.Warning("PoolMgr", "Release called with null.");
                 return;
             }
 
             var tracker = obj.GetComponent<PooledObjectTracker>();
             if (tracker == null)
             {
-                Debug.LogWarning($"[PoolMgr] Object '{obj.name}' has no PooledObjectTracker, destroying.");
+                Log.Warning("PoolMgr", $"Object '{obj.name}' has no PooledObjectTracker, destroying.");
                 Object.Destroy(obj);
                 return;
             }
@@ -116,7 +116,7 @@ namespace PumpGF
             }
             else
             {
-                Debug.LogWarning($"[PoolMgr] Pool '{tracker.poolKey}' not found, destroying object.");
+                Log.Warning("PoolMgr", $"Pool '{tracker.poolKey}' not found, destroying object.");
                 Object.Destroy(obj);
             }
         }

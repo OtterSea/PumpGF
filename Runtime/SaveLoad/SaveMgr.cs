@@ -18,12 +18,17 @@ namespace PumpGF
 
     /// <summary>
     /// 纯持久化模块。负责序列化、文件读写、版本迁移、槽位管理。
-    /// 不关心数据在内存里怎么被修改（那是 GameDataStore 的职责）。
+    /// 不关心数据在内存里怎么被修改（那是 <see cref="GameDataStore"/> 的职责）。
     /// </summary>
+    /// <remarks>
+    /// 文件 I/O 全部走 <see cref="IStorageBackend"/> 抽象，方便 WebGL/主机平台替换。
+    /// 默认后端为 <see cref="FileStorageBackend"/>（PC/Mobile/Editor 通用）。
+    /// </remarks>
     public sealed class SaveMgr : IModule
     {
         private ISaveProvider _provider;
         private IEncryptor _encryptor;
+        private IStorageBackend _storage;
         private string _saveRoot;
         private int _slotCount = 3;
 
@@ -34,6 +39,7 @@ namespace PumpGF
         {
             _provider = new JsonSaveProvider();
             _encryptor = new NoopEncryptor();
+            _storage = new FileStorageBackend();
             _saveRoot = Path.Combine(Application.persistentDataPath, "Saves");
         }
 
@@ -54,34 +60,35 @@ namespace PumpGF
             data.SchemaVersion = SaveSchema.CurrentVersion;
 
             var slotDir = GetSlotDir(slotId);
-            Directory.CreateDirectory(slotDir);
+            _storage.EnsureDirectory(slotDir);
 
             var savePath = Path.Combine(slotDir, "save.dat");
             var tmpPath = savePath + ".tmp";
+            var bakPath = savePath + ".bak";
 
             // 序列化 + 加密
             var bytes = _provider.Serialize(data);
             bytes = _encryptor.Encrypt(bytes);
 
             // 写入临时文件
-            await UniTask.RunOnThreadPool(() => File.WriteAllBytes(tmpPath, bytes), cancellationToken: ct);
+            await _storage.WriteAllBytesAsync(tmpPath, bytes, ct);
 
-            // 备份旧的
-            var bakPath = savePath + ".bak";
-            if (File.Exists(savePath))
+            // 备份旧的（存在时）
+            if (_storage.Exists(savePath))
             {
-                if (File.Exists(bakPath)) File.Delete(bakPath);
-                File.Move(savePath, bakPath);
+                _storage.Delete(bakPath);
+                _storage.Move(savePath, bakPath);
             }
 
             // rename tmp → save
-            File.Move(tmpPath, savePath);
+            _storage.Move(tmpPath, savePath);
 
             Log.Info("SaveMgr", $"Saved to slot {slotId} (v{data.SchemaVersion}).");
         }
 
         /// <summary>
         /// 加载存档。自动检测版本，链式迁移到当前版本，迁移后重新保存。
+        /// 存档不存在时返回 null；读取错误时抛异常（调用方可以 try/catch 后回退 <see cref="TryRestoreBackup"/>）。
         /// </summary>
         public async UniTask<T> LoadAsync<T>(int slotId, CancellationToken ct = default)
             where T : class, ISaveData, new()
@@ -91,16 +98,22 @@ namespace PumpGF
 
             var savePath = Path.Combine(GetSlotDir(slotId), "save.dat");
 
-            if (!File.Exists(savePath))
+            // 直接 try read（避免 Exists→Read 竞态）：不存在时后端返回 null
+            var bytes = await _storage.ReadAllBytesAsync(savePath, ct);
+            if (bytes == null)
             {
                 Log.Warning("SaveMgr", $"No save in slot {slotId}.");
                 return null;
             }
 
-            var bytes = await UniTask.RunOnThreadPool(() => File.ReadAllBytes(savePath), cancellationToken: ct);
             bytes = _encryptor.Decrypt(bytes);
 
             var data = _provider.Deserialize<T>(bytes);
+            if (data == null)
+            {
+                Log.Error("SaveMgr", $"Deserialize failed for slot {slotId}.");
+                return null;
+            }
 
             // 链式迁移
             int migrationsApplied = 0;
@@ -140,10 +153,18 @@ namespace PumpGF
             for (int i = 0; i < _slotCount; i++)
             {
                 var metaPath = Path.Combine(GetSlotDir(i), "meta.json");
-                if (File.Exists(metaPath))
+                if (_storage.Exists(metaPath))
                 {
-                    var json = File.ReadAllText(metaPath);
-                    list.Add(JsonUtility.FromJson<SaveSlotMeta>(json));
+                    try
+                    {
+                        var json = _storage.ReadAllText(metaPath);
+                        list.Add(JsonUtility.FromJson<SaveSlotMeta>(json));
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Warning("SaveMgr", $"Read meta for slot {i} failed: {e.Message}");
+                        list.Add(null);
+                    }
                 }
                 else
                 {
@@ -156,18 +177,15 @@ namespace PumpGF
         /// <summary>槽位是否有存档</summary>
         public bool HasSave(int slotId)
         {
-            return File.Exists(Path.Combine(GetSlotDir(slotId), "save.dat"));
+            return _storage.Exists(Path.Combine(GetSlotDir(slotId), "save.dat"));
         }
 
         /// <summary>删除槽位存档</summary>
         public void DeleteSave(int slotId)
         {
             var slotDir = GetSlotDir(slotId);
-            if (Directory.Exists(slotDir))
-            {
-                Directory.Delete(slotDir, recursive: true);
-                Log.Info("SaveMgr", $"Deleted slot {slotId}.");
-            }
+            _storage.DeleteDirectory(slotDir);
+            Log.Info("SaveMgr", $"Deleted slot {slotId}.");
         }
 
         /// <summary>槽位数量</summary>
@@ -195,17 +213,17 @@ namespace PumpGF
             var savePath = Path.Combine(slotDir, "save.dat");
             var bakPath = savePath + ".bak";
 
-            if (!File.Exists(bakPath)) return false;
+            if (!_storage.Exists(bakPath)) return false;
 
-            if (File.Exists(savePath)) File.Delete(savePath);
-            File.Move(bakPath, savePath);
+            _storage.Delete(savePath);
+            _storage.Move(bakPath, savePath);
 
             Log.Warning("SaveMgr", $"Restored backup for slot {slotId}.");
             return true;
         }
 
         // ──────────────────────────────────────────────
-        //  Provider / Encryptor 切换
+        //  Provider / Encryptor / Storage 切换
         // ──────────────────────────────────────────────
 
         public void SetProvider(ISaveProvider provider)
@@ -216,6 +234,12 @@ namespace PumpGF
         public void SetEncryptor(IEncryptor encryptor)
         {
             _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
+        }
+
+        /// <summary>切换存储后端（WebGL 用 PlayerPrefs 后端时替换）</summary>
+        public void SetStorageBackend(IStorageBackend storage)
+        {
+            _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         }
 
         // ──────────────────────────────────────────────
@@ -230,16 +254,18 @@ namespace PumpGF
         /// <summary>更新槽位元信息</summary>
         public void UpdateSlotMeta(int slotId, SaveSlotMeta meta)
         {
-            var metaPath = Path.Combine(GetSlotDir(slotId), "meta.json");
-            Directory.CreateDirectory(GetSlotDir(slotId));
+            var slotDir = GetSlotDir(slotId);
+            _storage.EnsureDirectory(slotDir);
+            var metaPath = Path.Combine(slotDir, "meta.json");
             var json = JsonUtility.ToJson(meta, prettyPrint: true);
-            File.WriteAllText(metaPath, json);
+            _storage.WriteAllText(metaPath, json);
         }
 
         public void Dispose()
         {
             _provider = null;
             _encryptor = null;
+            _storage = null;
             _migrations.Clear();
         }
     }
