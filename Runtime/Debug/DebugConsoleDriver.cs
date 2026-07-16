@@ -14,6 +14,7 @@ namespace PumpGF
         private string _input = "";
         private Vector2 _logScroll;
         private bool _showStats = true;
+        private int _historyIndex = -1;
 
         internal void Init(DebugConsole console)
         {

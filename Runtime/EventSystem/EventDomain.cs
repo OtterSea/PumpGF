@@ -49,7 +49,7 @@ namespace PumpGF
         }
 
         /// <summary>域内 R3 Observable</summary>
-        public IObservable<TEvent> OnEvent<TEvent>() where TEvent : struct
+        public Observable<TEvent> OnEvent<TEvent>() where TEvent : struct
         {
             return GetOrCreateSubject<TEvent>();
         }

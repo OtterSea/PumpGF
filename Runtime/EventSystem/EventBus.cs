@@ -96,7 +96,7 @@ namespace PumpGF
         /// <summary>
         /// 暴露 R3 Observable，可链式操作（Where/Throttle/CombineLatest 等）。
         /// </summary>
-        public IObservable<TEvent> OnEvent<TEvent>() where TEvent : struct
+        public Observable<TEvent> OnEvent<TEvent>() where TEvent : struct
         {
             return GetOrCreateSubject<TEvent>();
         }

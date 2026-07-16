@@ -63,10 +63,10 @@ namespace PumpGF
         public ReactiveProperty<Language> CurrentLanguage => _currentLanguage;
 
         /// <summary>语言切换事件流</summary>
-        public IObservable<Language> OnLanguageChanged => _onLanguageChanged;
+        public Observable<Language> OnLanguageChanged => _onLanguageChanged;
 
         /// <summary>字体切换事件流</summary>
-        public IObservable<TMP_FontAsset> OnFontChanged => _onFontChanged;
+        public Observable<TMP_FontAsset> OnFontChanged => _onFontChanged;
 
         /// <summary>默认语言（缺失回退目标）</summary>
         public Language DefaultLanguage => _defaultLanguage;
@@ -106,11 +106,9 @@ namespace PumpGF
             _currentLanguage.Value = lang;
             _onLanguageChanged.OnNext(lang);
 
-            // 字体切换
+            // 字体切换（TMP_Settings.defaultFontAsset 只读，业务层可订阅 OnFontChanged 自行处理）
             if (_currentData.Font != null)
             {
-                if (TMP_Settings.defaultFontAsset != _currentData.Font)
-                    TMP_Settings.defaultFontAsset = _currentData.Font;
                 _onFontChanged.OnNext(_currentData.Font);
             }
 
@@ -201,7 +199,7 @@ namespace PumpGF
         {
             try
             {
-                _defaultData = await _provider.LoadLocaleAsync(_defaultLanguage);
+                _defaultData = await _provider.LoadLocaleAsync(_defaultLanguage, default);
                 _currentData = _defaultData;
                 _currentLanguage.Value = _defaultLanguage;
                 Log.Info("Localization", $"默认语言预加载完成: {_defaultLanguage}");

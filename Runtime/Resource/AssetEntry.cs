@@ -1,4 +1,5 @@
 using System;
+using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace PumpGF
@@ -19,7 +20,7 @@ namespace PumpGF
         public Action<AssetEntry> OnReleased;
 
         /// <summary>资源结果（handle.Result）</summary>
-        public UnityEngine.Object Result => Handle.IsValid() ? Handle.Result : null;
+        public UnityEngine.Object Result => Handle.IsValid() ? Handle.Result as UnityEngine.Object : null;
 
         /// <summary>增加引用计数</summary>
         public void AddRef() => RefCount++;

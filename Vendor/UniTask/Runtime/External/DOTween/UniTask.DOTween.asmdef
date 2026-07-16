@@ -2,7 +2,7 @@
     "name": "UniTask.DOTween",
     "references": [
         "UniTask",
-        "DOTween.Modules"
+        "DOTween-Scripts"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -11,12 +11,7 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [
-        {
-            "name": "com.demigiant.dotween",
-            "expression": "",
-            "define": "UNITASK_DOTWEEN_SUPPORT"
-        }
-    ],
-    "noEngineReferences": false
+    "versionDefines": [],
+    "noEngineReferences": false,
+    "defineSymbols": []
 }

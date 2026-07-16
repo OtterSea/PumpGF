@@ -1,6 +1,5 @@
 ﻿// asmdef Version Defines, enabled when com.demigiant.dotween is imported.
-
-#if UNITASK_DOTWEEN_SUPPORT
+// NOTE: In PumpGF this file is always compiled; DOTween-Scripts is a direct asmdef reference.
 
 using Cysharp.Threading.Tasks.Internal;
 using DG.Tweening;
@@ -433,4 +432,4 @@ namespace Cysharp.Threading.Tasks
     }
 }
 
-#endif
+// #endif  // UNITASK_DOTWEEN_SUPPORT removed for PumpGF

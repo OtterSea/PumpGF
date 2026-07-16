@@ -179,21 +179,21 @@ namespace PumpGF
         // ──────────────────────────────────────────────
 
         /// <summary>动作执行时触发（按键按下瞬间）</summary>
-        public IObservable<InputAction.CallbackContext> OnActionPerformed(string actionName)
+        public Observable<InputAction.CallbackContext> OnActionPerformed(string actionName)
         {
             return GetOrCreateSubject(actionName, _performedSubjects,
                 (action, handler) => action.performed += handler);
         }
 
         /// <summary>动作开始</summary>
-        public IObservable<InputAction.CallbackContext> OnActionStarted(string actionName)
+        public Observable<InputAction.CallbackContext> OnActionStarted(string actionName)
         {
             return GetOrCreateSubject(actionName, _startedSubjects,
                 (action, handler) => action.started += handler);
         }
 
         /// <summary>动作取消（按键抬起）</summary>
-        public IObservable<InputAction.CallbackContext> OnActionCanceled(string actionName)
+        public Observable<InputAction.CallbackContext> OnActionCanceled(string actionName)
         {
             return GetOrCreateSubject(actionName, _canceledSubjects,
                 (action, handler) => action.canceled += handler);
@@ -320,7 +320,7 @@ namespace PumpGF
         /// <summary>
         /// 开始监听下一个输入设备用于重映射。返回 Observable，用户按下任意键时发出 bindingPath。
         /// </summary>
-        public IObservable<string> StartRebind(string actionName, int bindingIndex)
+        public Observable<string> StartRebind(string actionName, int bindingIndex)
         {
             var subject = new Subject<string>();
             var action = FindAction(actionName);

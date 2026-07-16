@@ -274,7 +274,7 @@ namespace PumpGF
             return timer;
         }
 
-        private void ReturnTimer(Timer timer)
+        internal void ReturnTimer(Timer timer)
         {
             if (timer == null || timer.IsReturned) return;
             timer.IsReturned = true;
@@ -317,7 +317,7 @@ namespace PumpGF
                 ct.Register(() => timer.CancelInternal());
             if (ownerActive)
             {
-                var ownerCt = owner.destroyCancellationToken;
+                var ownerCt = owner.GetCancellationTokenOnDestroy();
                 if (ownerCt.CanBeCanceled)
                     ownerCt.Register(() => timer.CancelInternal());
             }
@@ -326,7 +326,7 @@ namespace PumpGF
         private void BindOwner(Timer timer, GameObject owner)
         {
             if (owner == null) return;
-            var ownerCt = owner.destroyCancellationToken;
+            var ownerCt = owner.GetCancellationTokenOnDestroy();
             if (ownerCt.CanBeCanceled)
                 ownerCt.Register(() => timer.CancelInternal());
         }

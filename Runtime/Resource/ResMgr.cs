@@ -22,7 +22,7 @@ namespace PumpGF
         // 实例 → 实例追踪条目
         private readonly Dictionary<GameObject, InstanceEntry> _instances = new(128);
         // Addressables 初始化任务（缓存，防并发竞态）
-        private UniTask _initTask;
+        private UniTask? _initTask;
 
         // ──────────────────────────────────────────────
         //  IModule
@@ -30,7 +30,7 @@ namespace PumpGF
 
         public void Init()
         {
-            _initTask = default;
+            _initTask = null;
         }
 
         // ──────────────────────────────────────────────
@@ -123,10 +123,11 @@ namespace PumpGF
             };
 
             // 绑定 destroyCancellationToken：GameObject 销毁时自动清理
-            instance.destroyCancellationToken.Register(() =>
+            instance.GetCancellationTokenOnDestroy().Register(() =>
             {
-                if (_instances.Remove(instance, out var entry))
+                if (_instances.TryGetValue(instance, out var entry))
                 {
+                    _instances.Remove(instance);
                     if (entry.Source == InstanceSource.Direct)
                     {
                         entry.AssetHandle?.Dispose();
@@ -301,7 +302,9 @@ namespace PumpGF
 
         private UniTask EnsureAddressablesInitialized()
         {
-            return _initTask ??= InitCoreAsync();
+            if (_initTask == null)
+                _initTask = InitCoreAsync();
+            return _initTask.Value;
         }
 
         private async UniTask InitCoreAsync()
@@ -311,7 +314,7 @@ namespace PumpGF
 
             if (init.Status != AsyncOperationStatus.Succeeded)
             {
-                _initTask = default;
+                _initTask = null;
                 Log.Error("ResMgr", "Addressables 初始化失败。");
                 throw new InvalidOperationException("[ResMgr] Addressables initialization failed.");
             }

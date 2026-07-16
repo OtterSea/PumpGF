@@ -4,6 +4,7 @@ using System.Threading;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
+using UObject = UnityEngine.Object;
 
 namespace PumpGF
 {
@@ -52,7 +53,7 @@ namespace PumpGF
         private void CreateCanvas()
         {
             _canvasGo = new GameObject("PumpGF_FadeTransition");
-            Object.DontDestroyOnLoad(_canvasGo);
+            UObject.DontDestroyOnLoad(_canvasGo);
             var canvas = _canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 9999;
@@ -66,7 +67,7 @@ namespace PumpGF
         {
             if (_canvasGo != null)
             {
-                Object.Destroy(_canvasGo);
+                UObject.Destroy(_canvasGo);
                 _canvasGo = null;
                 _image = null;
             }

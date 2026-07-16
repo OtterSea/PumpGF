@@ -94,7 +94,7 @@ namespace PumpGF
         // ──────────────────────────────────────────────
 
         /// <summary>获取指定通道的 R3 Observable（享受操作符能力）</summary>
-        public IObservable<float> GetUpdateObservable(UpdateChannel channel)
+        public Observable<float> GetUpdateObservable(UpdateChannel channel)
         {
             if (!_updateSubjects.TryGetValue(channel, out var subject))
             {
@@ -105,10 +105,10 @@ namespace PumpGF
         }
 
         /// <summary>Unity 原生 FixedUpdate Observable</summary>
-        public IObservable<float> FixedUpdateObservable => _fixedUpdateSubject;
+        public Observable<float> FixedUpdateObservable => _fixedUpdateSubject;
 
         /// <summary>Unity 原生 LateUpdate Observable</summary>
-        public IObservable<float> LateUpdateObservable => _lateUpdateSubject;
+        public Observable<float> LateUpdateObservable => _lateUpdateSubject;
 
         /// <summary>零分配热路径回调注册。返回 IDisposable，Dispose 即取消。</summary>
         public IDisposable RegisterTick(UpdateChannel channel, Action<float> callback)
@@ -181,7 +181,7 @@ namespace PumpGF
         }
 
         /// <summary>通道暂停状态变化流</summary>
-        public IObservable<bool> ObserveChannelPaused(UpdateChannel channel)
+        public Observable<bool> ObserveChannelPaused(UpdateChannel channel)
         {
             // TODO: 优化为专门的 Subject 跟踪暂停状态变化
             // 当前简化：返回 GetUpdateObservable 的派生（dt == 0 表示暂停）
@@ -246,8 +246,8 @@ namespace PumpGF
         //  场景钩子
         // ──────────────────────────────────────────────
 
-        public IObservable<Scene> OnSceneLoaded => _onSceneLoaded;
-        public IObservable<Scene> OnSceneUnloaded => _onSceneUnloaded;
+        public Observable<Scene> OnSceneLoaded => _onSceneLoaded;
+        public Observable<Scene> OnSceneUnloaded => _onSceneUnloaded;
 
         /// <summary>注册场景生命周期监听器（按优先级排序，高优先）</summary>
         public void RegisterSceneLifecycle(ISceneLifecycle listener, int priority = 0)
@@ -266,9 +266,9 @@ namespace PumpGF
         //  应用生命周期
         // ──────────────────────────────────────────────
 
-        public IObservable<bool> OnApplicationFocusChanged => _onAppFocusChanged;
-        public IObservable<bool> OnApplicationPauseChanged => _onAppPauseChanged;
-        public IObservable<Unit> OnApplicationQuit => _onAppQuit;
+        public Observable<bool> OnApplicationFocusChanged => _onAppFocusChanged;
+        public Observable<bool> OnApplicationPauseChanged => _onAppPauseChanged;
+        public Observable<Unit> OnApplicationQuit => _onAppQuit;
 
         // ──────────────────────────────────────────────
         //  CTS 工厂
@@ -277,7 +277,7 @@ namespace PumpGF
         /// <summary>绑定 GameObject 生命周期的 Token</summary>
         public CancellationToken CreateLinkedToken(GameObject owner)
         {
-            return owner != null ? owner.destroyCancellationToken : CancellationToken.None;
+            return owner != null ? owner.GetCancellationTokenOnDestroy() : CancellationToken.None;
         }
 
         /// <summary>超时 Token</summary>
