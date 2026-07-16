@@ -47,8 +47,18 @@ namespace PumpGF
         /// <summary>输入管理模块（上下文栈/R3暴露/缓冲/重映射）</summary>
         public static InputMgr InputMgr { get; private set; }
 
+        /// <summary>实体管理模块（ECS-Lite 组合/查询/池化）</summary>
+        public static EntityManager EntityManager { get; private set; }
+
+        /// <summary>关卡/场景管理模块（ILevel/过渡/Additive/Update 绑定）</summary>
+        public static LevelManager LevelManager { get; private set; }
+
+        /// <summary>调试控制台模块（命令/性能面板/Gizmos，#if DEBUG 主体）</summary>
+        public static DebugConsole DebugConsole { get; private set; }
+
         // 后续批次添加更多模块：
-        // CameraMgr / EntityManager / LevelManager / DebugConsole
+        // CameraMgr
+        // 注：FSM/HSM 为纯 C# 库（非 IModule），业务直接用 StateMachineBuilder 创建。
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
         static void EnsureInitialized()
@@ -105,6 +115,18 @@ namespace PumpGF
             InputMgr = new InputMgr();
             InputMgr.Init();
 
+            // 13. EntityManager（无强依赖，FSM 运行时关联）
+            EntityManager = new EntityManager();
+            EntityManager.Init();
+
+            // 14. LevelManager（依赖 ResMgr/Lifecycle/UIManager）
+            LevelManager = new LevelManager();
+            LevelManager.Init();
+
+            // 15. DebugConsole（最后，依赖其他模块指标；Release 时为空壳）
+            DebugConsole = new DebugConsole();
+            DebugConsole.Init();
+
             Application.quitting += Dispose;
 
             Log.Info("GameGlobal", "PumpGF GameGlobal initialized.");
@@ -119,6 +141,9 @@ namespace PumpGF
             Application.quitting -= Dispose;
 
             // 按初始化逆序释放
+            DebugConsole?.Dispose();
+            LevelManager?.Dispose();
+            EntityManager?.Dispose();
             InputMgr?.Dispose();
             AudioMgr?.Dispose();
             Localization?.Dispose();
@@ -132,6 +157,9 @@ namespace PumpGF
             Scheduler?.Dispose();
             LifecycleMgr?.Dispose();
 
+            DebugConsole = null;
+            LevelManager = null;
+            EntityManager = null;
             InputMgr = null;
             AudioMgr = null;
             Localization = null;

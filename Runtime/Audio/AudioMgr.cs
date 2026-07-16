@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using DG.Tweening;
@@ -369,7 +370,7 @@ namespace PumpGF
             }
         }
 
-        internal void StopSfx(SfxInstance inst, float fadeOut)
+        private void StopSfx(SfxInstance inst, float fadeOut)
         {
             if (inst == null || inst.Released || inst.Source == null) return;
             if (fadeOut <= 0f)

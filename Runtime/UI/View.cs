@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using R3;
 using TMPro;
@@ -79,7 +80,7 @@ namespace PumpGF
 
         /// <summary>绑定文本属性到 TMP_Text（自动刷新，可选格式化）</summary>
         protected IDisposable BindText<T>(
-            IReadOnlyReactiveProperty<T> prop, TMP_Text text, Func<T, string> formatter = null)
+            ReadOnlyReactiveProperty<T> prop, TMP_Text text, Func<T, string> formatter = null)
         {
             return prop.Subscribe(v =>
             {
@@ -88,13 +89,13 @@ namespace PumpGF
         }
 
         /// <summary>绑定 float 属性到 Slider.value</summary>
-        protected IDisposable BindSlider(IReadOnlyReactiveProperty<float> prop, Slider slider)
+        protected IDisposable BindSlider(ReadOnlyReactiveProperty<float> prop, Slider slider)
         {
             return prop.Subscribe(v => slider.value = v).AddTo(ref Bag);
         }
 
         /// <summary>绑定 bool 属性到 GameObject 激活状态</summary>
-        protected IDisposable BindActive(IReadOnlyReactiveProperty<bool> prop, GameObject target)
+        protected IDisposable BindActive(ReadOnlyReactiveProperty<bool> prop, GameObject target)
         {
             return prop.Subscribe(active => target.SetActive(active)).AddTo(ref Bag);
         }

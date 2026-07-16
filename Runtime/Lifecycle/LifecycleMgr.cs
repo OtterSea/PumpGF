@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Collections.Generic;
 using R3;
 using UnityEngine;
@@ -324,17 +325,17 @@ namespace PumpGF
             _lateUpdateSubject.OnNext(Time.deltaTime);
         }
 
-        internal void OnApplicationFocus(bool hasFocus)
+        internal void NotifyApplicationFocus(bool hasFocus)
         {
             _onAppFocusChanged.OnNext(hasFocus);
         }
 
-        internal void OnApplicationPause(bool pauseStatus)
+        internal void NotifyApplicationPause(bool pauseStatus)
         {
             _onAppPauseChanged.OnNext(pauseStatus);
         }
 
-        internal void OnApplicationQuit()
+        internal void NotifyApplicationQuit()
         {
             _onAppQuit.OnNext(Unit.Default);
         }

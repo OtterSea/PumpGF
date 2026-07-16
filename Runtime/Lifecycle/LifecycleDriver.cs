@@ -53,17 +53,17 @@ namespace PumpGF
 
         private void OnApplicationFocus(bool hasFocus)
         {
-            _mgr?.OnApplicationFocus(hasFocus);
+            _mgr?.NotifyApplicationFocus(hasFocus);
         }
 
         private void OnApplicationPause(bool pauseStatus)
         {
-            _mgr?.OnApplicationPause(pauseStatus);
+            _mgr?.NotifyApplicationPause(pauseStatus);
         }
 
         private void OnApplicationQuit()
         {
-            _mgr?.OnApplicationQuit();
+            _mgr?.NotifyApplicationQuit();
         }
 
         private void OnDestroy()

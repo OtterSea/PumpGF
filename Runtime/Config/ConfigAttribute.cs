@@ -45,4 +45,8 @@ namespace PumpGF
     /// <summary>标记配置表行的 key 字段唯一</summary>
     [AttributeUsage(AttributeTargets.Field)]
     public class UniqueIdAttribute : PropertyAttribute { }
+
+    /// <summary>标记字段为 Addressables 配置 key（与 Addressables 不一致时黄色警告）</summary>
+    [AttributeUsage(AttributeTargets.Field)]
+    public class ConfigKeyAttribute : PropertyAttribute { }
 }

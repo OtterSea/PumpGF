@@ -4,8 +4,12 @@
     "references": [
         "Unity.Addressables",
         "Unity.ResourceManager",
+        "Unity.InputSystem",
+        "Unity.TextMeshPro",
         "UniTask",
-        "UniTask.Addressables"
+        "UniTask.Addressables",
+        "R3.Unity",
+        "DOTween-Scripts"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
