@@ -29,50 +29,23 @@
 
 ---
 
-## 依赖库总览
+## 安装步骤（Unity 2022.3 LTS）
 
-| 库 | 引入方式 | 位置 |
-|---|---|---|
-| **UniTask** | Git URL（UPM） | 项目层 `Packages/manifest.json` |
-| **R3.Unity 集成层** | Git URL（UPM） | 项目层 `Packages/manifest.json` |
-| **R3 核心 DLL** | 已内置 | [`Vendor/R3.Unity/Runtime/Plugins/`](Vendor/R3.Unity/Runtime/Plugins) |
-| **DOTween / DOTween Pro** | 已内置（源码 + `DOTweenPro.dll`） | [`Vendor/Demigiant/`](Vendor/Demigiant) |
-| **KCC（Kinematic Character Controller）** | 已内置（源码） | [`Vendor/KCC/`](Vendor/KCC) |
-| **UniTask.DOTween 扩展** | 已内置且做过改造 | [`Vendor/UniTask/Runtime/External/DOTween/`](Vendor/UniTask/Runtime/External/DOTween) |
-| **Addressables / InputSystem / Cinemachine / TextMeshPro** | Unity 官方 UPM | 项目层 `Packages/manifest.json` |
+框架已把所有第三方依赖以**源码 / DLL** 形式内置在 [`Vendor/`](Vendor) 目录（包括 UniTask、R3.Unity 集成层、R3 核心 DLL、DOTween / DOTween Pro、KCC 等），因此安装只需**一步**：
 
-除了 UniTask 和 R3.Unity 集成层需要从 UPM 拉取，**其他依赖都已经内置在框架里**，安装完框架即可开箱即用。
-
----
-
-## 安装步骤（仅针对 Unity 2022.3 LTS）
-
-### 前置条件
-
-- 已安装 Unity 2022.3 LTS（推荐 2022.3.62f3c1 或更新的补丁版本）
-- 已有一个空的或现有的 Unity 项目
-
-### 方式一（推荐）：使用 Unity Package Manager 图形界面
-
-Unity 2022 支持在 Package Manager 里通过 "Add package from git URL" 直接拉取 Git 仓库，无需手工编辑 `manifest.json`。
+### 唯一步骤：通过 UPM 添加 PumpGF 的 Git URL
 
 1. 打开 Unity 项目
 2. 顶部菜单 **`Window → Package Manager`** 打开包管理器
 3. 点击窗口左上角的 **`+`** 按钮 → 选择 **`Add package from git URL...`**
-4. **依次**粘贴以下三个地址，每粘贴一个都点 `Add` 并等待完成后再进行下一个（顺序无所谓）：
+4. 粘贴以下地址后点击 `Add`：
 
    ```
-   https://github.com/OtterSea/PumpGF.git?path=Packages/PumpGF
-   ```
-   ```
-   https://github.com/Cysharp/R3.git?path=src/R3.Unity/Assets/R3.Unity#1.3.0
-   ```
-   ```
-   https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask
+   https://github.com/OtterSea/PumpGF.git
    ```
 
-5. 三个包全部拉取完成后，Unity 会自动编译，Console 应无编译错误
-6. 此时你可以在自己代码里：
+5. 等待 Unity 拉取并编译完成，Console 应无编译错误
+6. 在代码中即可使用：
 
    ```csharp
    using PumpGF;
@@ -80,33 +53,29 @@ Unity 2022 支持在 Package Manager 里通过 "Add package from git URL" 直接
    using Cysharp.Threading.Tasks;
    ```
 
-   开始使用框架。
+> 💡 如果你更习惯直接编辑 `Packages/manifest.json`，等效于在 `dependencies` 里追加一条：
+> ```json
+> "com.pumpgf.framework": "https://github.com/OtterSea/PumpGF.git"
+> ```
 
-> 💡 如果只想装 PumpGF 主包看看，仅粘贴第一条 URL 即可；但由于 PumpGF 依赖 R3 与 UniTask，缺少后两者会导致大量编译错误。
+---
 
-### 方式二：直接编辑 `Packages/manifest.json`
+## 内置的第三方库
 
-如果你更习惯编辑 `manifest.json`，打开项目根目录下的 `Packages/manifest.json`，在 `dependencies` 中添加以下三条依赖（如果已有其他条目，合并即可，顺序无所谓）：
+| 库 | 位置 | 备注 |
+|---|---|---|
+| **UniTask**（源码） | [`Vendor/UniTask/`](Vendor/UniTask) | 高性能异步 |
+| **R3.Unity 集成层**（源码） | [`Vendor/R3.Unity/`](Vendor/R3.Unity) | R3 的 Unity 桥接层 |
+| **R3 核心 DLL** | [`Vendor/R3.Unity/Runtime/Plugins/`](Vendor/R3.Unity/Runtime/Plugins) | 响应式编程库主体 |
+| **DOTween / DOTween Pro** | [`Vendor/Demigiant/`](Vendor/Demigiant) | 动画 |
+| **KCC（Kinematic Character Controller）** | [`Vendor/KCC/`](Vendor/KCC) | 角色控制器 |
+| **UniTask.DOTween 扩展**（已改造） | [`Vendor/UniTask/Runtime/External/DOTween/`](Vendor/UniTask/Runtime/External/DOTween) | 让 DOTween 支持 `await` |
 
-```json
-{
-  "dependencies": {
-    "com.pumpgf.framework": "https://github.com/OtterSea/PumpGF.git?path=Packages/PumpGF",
-    "com.cysharp.r3": "https://github.com/Cysharp/R3.git?path=src/R3.Unity/Assets/R3.Unity#1.3.0",
-    "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"
-  }
-}
-```
+框架同时依赖以下 Unity 官方 UPM 包，Unity 会通过 [`package.json`](package.json) 自动解析安装：
 
-保存后打开或刷新 Unity，等待包解析完成即可。
-
-> 📌 如果是**本地开发**（例如你已经把 PumpGF 克隆到磁盘），可以把第一行改成本地路径引用，例如：`"com.pumpgf.framework": "file:../Packages/PumpGF"`。
-
-### 关于 R3 核心 DLL
-
-R3 的 UPM 集成包（`com.cysharp.r3`）**只包含 Unity 集成层的源码**，不包含核心 `R3.dll`。核心 DLL（`R3.dll`、`Microsoft.Bcl.AsyncInterfaces.dll`、`Microsoft.Bcl.TimeProvider.dll`）**已内置**在框架内的 [`Vendor/R3.Unity/Runtime/Plugins/`](Vendor/R3.Unity/Runtime/Plugins) 目录，无需额外安装。
-
-> ⚠️ **常见坑**：这三个 DLL 的 `.meta` 文件必须把 `Editor` 平台设置为 `enabled: 1`。如果被误关闭，Editor 里会报 `error CS0234: The type or namespace name 'Collections' does not exist in the namespace 'R3'` 一类的错误。修复方法：在 Unity Inspector 里选中三个 DLL，把 `Editor` 平台勾选启用，或者直接编辑对应的 `.meta` 文件。
+- `com.unity.addressables`
+- `com.unity.inputsystem`
+- `com.unity.cinemachine`
 
 ---
 
@@ -132,67 +101,38 @@ R3 的 UPM 集成包（`com.cysharp.r3`）**只包含 Unity 集成层的源码**
 
 ### 背景
 
-团结引擎（Tuanjie 1.9.x）基于 Unity 2022 LTS，但对 .NET BCL 程序集的加载做了限制：
+团结引擎（Tuanjie 1.9.x）基于 Unity 2022 LTS，但对 .NET BCL 程序集的加载做了限制：将 `Microsoft.Bcl.AsyncInterfaces`、`Microsoft.Bcl.TimeProvider` 等 BCL 程序集视为**引擎内置模块**，**不允许 `Plugins/` 目录再加载同名 DLL**。因此，框架内置在 [`Vendor/R3.Unity/Runtime/Plugins/`](Vendor/R3.Unity/Runtime/Plugins) 里的三个 R3 相关 DLL 在团结引擎下会引发加载冲突，导致项目无法正常打开。
 
-- 团结引擎将 `Microsoft.Bcl.AsyncInterfaces`、`Microsoft.Bcl.TimeProvider` 等 BCL 程序集视为**引擎内置模块**，**不允许 `Plugins/` 目录再加载同名 DLL**
-- 因此，框架内置在 [`Vendor/R3.Unity/Runtime/Plugins/`](Vendor/R3.Unity/Runtime/Plugins) 里的三个 R3 相关 DLL 在团结引擎下会引发加载冲突，导致项目无法正常打开
-- R3 官方对此类场景明确建议：改用 [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity) 从 NuGet 源安装 R3，以规避 DLL 与引擎内置模块的冲突
+R3 官方对此类场景明确建议：改用 [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity) 从 NuGet 源安装 R3，以规避 DLL 与引擎内置模块的冲突。
 
 ### 迁移步骤
 
-如果你确认要在团结引擎项目中使用 PumpGF，请按以下步骤操作：
+1. **通过 UPM 安装 NuGetForUnity**：在项目 `Packages/manifest.json` 中追加 NuGetForUnity 的 Git URL 依赖：
 
-#### 1. 通过 UPM 安装 NuGetForUnity
+   ```json
+   "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity/Assets/NuGet"
+   ```
 
-在项目 `Packages/manifest.json` 中追加 NuGetForUnity 的 Git URL 依赖（示例，请以 NuGetForUnity 官方 README 的最新地址为准）：
+   保存后打开团结引擎，等待 NuGetForUnity 拉取完成。此时顶部菜单栏应出现 **`NuGet`** 菜单项。
 
-```json
-{
-  "dependencies": {
-    "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity/Assets/NuGet"
-  }
-}
-```
+2. **删除框架内置的 R3 相关 DLL**：进入 [`Vendor/R3.Unity/Runtime/Plugins/`](Vendor/R3.Unity/Runtime/Plugins)，**删除以下三份 DLL 及其对应的 `.meta` 文件**：
 
-保存后打开 Unity，等待 NuGetForUnity 拉取完成。此时 Unity 顶部菜单栏应出现 **`NuGet`** 菜单项。
+   - `R3.dll` + `R3.dll.meta`
+   - `Microsoft.Bcl.AsyncInterfaces.dll` + `Microsoft.Bcl.AsyncInterfaces.dll.meta`
+   - `Microsoft.Bcl.TimeProvider.dll` + `Microsoft.Bcl.TimeProvider.dll.meta`
 
-#### 2. 删除框架内置的 R3 相关 DLL
+   > ⚠️ Unity 官方 UPM 包默认为**只读**。如果 PumpGF 是以 Git URL 方式引入的，`Packages/PumpGF/` 目录不可直接修改。此时需要把 PumpGF 改为**本地路径引用**（如 `"com.pumpgf.framework": "file:../Packages/PumpGF"`），或在本地维护一份 fork，再执行删除操作。
 
-进入以下目录，**删除三份 DLL 及其对应的 `.meta` 文件**：
+3. **通过 NuGetForUnity 安装 R3**：在 Unity 顶部菜单点 **`NuGet → Manage NuGet Packages`**，搜索 `R3`（Author: Cysharp），点击 **Install**。NuGetForUnity 会自动解析并安装 R3 及其 BCL 依赖，DLL 会被放置到 `Assets/Packages/` 目录下。
 
-```
-Packages/PumpGF/Vendor/R3.Unity/Runtime/Plugins/
-├── R3.dll                              ← 删除
-├── R3.dll.meta                         ← 删除
-├── Microsoft.Bcl.AsyncInterfaces.dll   ← 删除
-├── Microsoft.Bcl.AsyncInterfaces.dll.meta  ← 删除
-├── Microsoft.Bcl.TimeProvider.dll      ← 删除
-└── Microsoft.Bcl.TimeProvider.dll.meta ← 删除
-```
-
-删除完成后，`Plugins/` 目录可保留为空目录（连同 `Plugins.meta`），也可以一并删除。
-
-> ⚠️ Unity 官方 UPM 包默认为**只读**。如果 PumpGF 是以 Git URL 或注册表方式引入的，`Packages/PumpGF/` 目录不可直接修改。此时需要把 PumpGF 改成**本地路径引用**（如 `"com.pumpgf.framework": "file:../Packages/PumpGF"`），或直接在本地维护一份 fork，再执行删除操作。
-
-#### 3. 通过 NuGetForUnity 安装 R3
-
-1. 在 Unity 顶部菜单点 **`NuGet` → `Manage NuGet Packages`**
-2. 在弹出的窗口顶部搜索框输入：`R3`
-3. 从搜索结果中定位 **`R3`**（Author: Cysharp），点击右侧 **Install**
-4. NuGetForUnity 会自动解析并安装 R3 及其 BCL 依赖（`Microsoft.Bcl.AsyncInterfaces`、`Microsoft.Bcl.TimeProvider` 等），DLL 会被放置到 `Assets/Packages/` 目录下
-
-#### 4. 等待编译并验证
-
-Unity 会自动重新编译。理想结果：Console 无编译报错，PumpGF 与业务代码均可正常 `using R3;`。
+4. **等待编译验证**：Unity 会自动重新编译。理想结果：Console 无编译报错，PumpGF 与业务代码均可正常 `using R3;`。
 
 ### 已知风险
 
-- 团结引擎版本迭代较快，NuGetForUnity 与团结引擎的兼容性未必稳定
-- 如果 NuGetForUnity 无法通过 Git URL 拉取（例如网络问题或仓库结构变动），可从其 GitHub Release 下载 `.unitypackage` 手动导入
-- 若需要打 IL2CPP 包，可能还需要额外配置 `link.xml` 防止 R3 相关类型被裁剪，具体请参考 R3 官方文档
-- 迁移完成后，PumpGF 后续升级时需要注意：不要覆盖被删除的 `Plugins/` 目录相关文件
-
-如遇更多问题，可参考 [`AI编程规范/踩坑记录.md`](AI编程规范/踩坑记录.md) 顶部关于团结引擎兼容性的说明。
+- 团结引擎版本迭代较快，NuGetForUnity 与团结引擎的兼容性未必长期稳定
+- 若 NuGetForUnity 无法通过 Git URL 拉取，可从其 GitHub Release 下载 `.unitypackage` 手动导入
+- 若需打 IL2CPP 包，可能还需额外配置 `link.xml` 防止 R3 相关类型被裁剪，请参考 R3 官方文档
+- 迁移完成后，PumpGF 后续升级时需注意：不要覆盖被删除的 `Plugins/` 目录相关文件
 
 ---
 
