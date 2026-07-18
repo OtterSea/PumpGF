@@ -55,7 +55,8 @@
 
 > 💡 如果你更习惯直接编辑 `Packages/manifest.json`，等效于在 `dependencies` 里追加一条：
 > ```json
-> "com.pumpgf.framework": "https://github.com/OtterSea/PumpGF.git"
+> "com.pumpgf.framework": "https://github.com/OtterSea/PumpGF.git",
+> "com.pumpgfx.framework": "file:PumpGF",
 > ```
 
 ---
@@ -97,6 +98,9 @@
 
 ## 附录：在团结引擎（Tuanjie 1.9.x）中使用 PumpGF
 
+> ⚠️⚠️⚠️!!! 2026.07.18亲测：1.9.3团结引擎直接引入本框架没有报错，引入方式如上面的github链接即可 !!!⚠️⚠️⚠️
+
+> ⚠️以下为原AI生成的基于团结引擎的适配，仅用作备份，以下内容仅供参考，可能无用
 > ⚠️ 本节仅作**技术记录**。作者不对团结引擎做官方支持，也不承诺后续版本兼容性，仅提供一个可行的迁移思路供高级用户参考。
 
 ### 背景
@@ -110,7 +114,7 @@ R3 官方对此类场景明确建议：改用 [NuGetForUnity](https://github.com
 1. **通过 UPM 安装 NuGetForUnity**：在项目 `Packages/manifest.json` 中追加 NuGetForUnity 的 Git URL 依赖：
 
    ```json
-   "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity/Assets/NuGet"
+   "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
    ```
 
    保存后打开团结引擎，等待 NuGetForUnity 拉取完成。此时顶部菜单栏应出现 **`NuGet`** 菜单项。
