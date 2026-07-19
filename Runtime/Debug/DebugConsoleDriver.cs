@@ -13,7 +13,7 @@ namespace PumpGF
         private DebugConsole _console;
         private string _input = "";
         private Vector2 _logScroll;
-        private bool _showStats = true;
+        private bool _showStats = false;//true;
         private int _historyIndex = -1;
 
         internal void Init(DebugConsole console)

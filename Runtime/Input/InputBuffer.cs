@@ -46,6 +46,20 @@ namespace PumpGF
             return false;
         }
 
+        /// <summary>查询是否有有效缓冲输入（不消费）</summary>
+        public bool Has(string actionName)
+        {
+            if (string.IsNullOrEmpty(actionName)) return false;
+            if (_timestamps.TryGetValue(actionName, out var t))
+            {
+                if (Time.time - t <= _window)
+                    return true;
+                // 已超时，清理
+                _timestamps.Remove(actionName);
+            }
+            return false;
+        }
+
         /// <summary>清空所有缓冲</summary>
         public void Clear() => _timestamps.Clear();
     }

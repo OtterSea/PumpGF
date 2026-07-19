@@ -328,6 +328,9 @@ namespace PumpGF
         /// <summary>消费缓冲的输入（动画状态机调用）。返回 true 表示有有效缓冲输入并已消费。</summary>
         public bool ConsumeInput(string actionName) => _buffer.Consume(actionName);
 
+        /// <summary>查询是否有有效缓冲输入（纯查询，不消费）</summary>
+        public bool HasBufferedInput(string actionName) => _buffer.Has(actionName);
+
         /// <summary>清空所有缓冲</summary>
         public void ClearBuffer() => _buffer.Clear();
 

@@ -60,7 +60,7 @@ namespace PumpGF
         // CameraMgr
         // 注：FSM/HSM 为纯 C# 库（非 IModule），业务直接用 StateMachineBuilder 创建。
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void EnsureInitialized()
         {
             if (_initialized) return;

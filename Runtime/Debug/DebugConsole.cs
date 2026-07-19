@@ -13,7 +13,11 @@ namespace PumpGF
     /// </summary>
     public sealed class DebugConsole : IModule
     {
-        // 命令条目（#if DEBUG 内使用）
+        public DebugConsoleConfig Config { get; set; } = new();
+        public bool GizmosEnabled { get; set; } = true;
+
+#if DEBUG
+        // 命令条目
         private readonly Dictionary<string, CommandEntry> _commands = new();
         // 环形历史 / 日志缓冲（Queue 均摊 O(1)，避免 List.RemoveAt(0) 的 O(n)）
         private readonly Queue<string> _history = new(64);
@@ -25,11 +29,6 @@ namespace PumpGF
         // 用于对外暴露的快照缓冲（避免 IReadOnlyList<T> 每次都新建）
         private readonly List<string> _historyView = new(64);
         private readonly List<string> _consoleLogView = new(256);
-
-        public DebugConsoleConfig Config { get; set; } = new();
-        public bool GizmosEnabled { get; set; } = true;
-
-#if DEBUG
         private DebugConsoleDriver _driver;
         private bool _visible;
 
