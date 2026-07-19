@@ -2,7 +2,12 @@
     "name": "PumpGF.Editor",
     "rootNamespace": "PumpGF.Editor",
     "references": [
-        "PumpGF.Runtime"
+        "PumpGF.Runtime",
+        "DOTween-Scripts",
+        "R3.Unity",
+        "UniTask",
+        "UniTask.Addressables",
+        "UniTask.DOTween"
     ],
     "includePlatforms": [
         "Editor"

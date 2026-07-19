@@ -5,7 +5,11 @@
         "PumpGF.Runtime",
         "UniTask",
         "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner"
+        "UnityEditor.TestRunner",
+        "DOTween-Scripts",
+        "R3.Unity",
+        "UniTask.Addressables",
+        "UniTask.DOTween"
     ],
     "includePlatforms": [
         "Editor"
