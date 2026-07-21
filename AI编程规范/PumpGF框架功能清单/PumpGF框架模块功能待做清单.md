@@ -55,6 +55,7 @@
 | 3-1 | FSM / HSM | ⬜ 待设计 | 层级状态机、条件转换、状态数据注入、SO 配置状态图 | 纯 C# 实现；支持 Enter/Exit/Update 生命周期；提供 StateMachineBuilder 流畅 API；禁止 Update 里写 if-else。 |
 | 3-2 | Entity Component (ECS-Lite) | ⬜ 待设计 | 纯 C# 组合模式、Component 注册、Entity Builder、属性变更流 | 非 DOTS；IComponent 标记接口；EntityBuilder 链式创建；属性变更走 R3 Subject；提供 Query 过滤器。 |
 | 3-3 | Level / Scene Manager | ⬜ 待设计 | 场景加载流程、过渡动画、关卡数据注入、Additive Loading | 与 Addressables/Lifecycle 联动；ILevel 接口标准化入口；提供 SceneTransition 可配置过渡效果。 |
+| 3-4 | BehaviorTree (AISystem) | 🟨 设计中 | 纯 C# 行为树、Composite/Decorator/Leaf 三态节点、类型安全黑板、UtilitySelector 收敛 Utility AI、Reactive 打断 | 自研不引商店插件；BehaviorTreeBuilder 流畅 API；UniTask 异步叶节点；与 FSM 组合、Lifecycle 驱动、EventBus 可选。设计契约见 `PumpGF框架功能清单/AISystem/BehaviorTree模块功能设计指南.md`。**明确不做 GOAP/HTN**。 |
 
 ### Phase 4: 工程化与 AI 协作层
 > **目标**：提升框架可维护性与 AI 协作效率，贯穿整个开发周期。
