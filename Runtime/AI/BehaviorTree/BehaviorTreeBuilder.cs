@@ -98,9 +98,21 @@ namespace PumpGF
         public BehaviorTreeBuilder Condition(Func<TickContext, bool> predicate)
             => PushDecorator(new ConditionNode(predicate));
 
-        /// <summary>反应式中止装饰器：监听黑板 Key，值变化时中止子树重评估。</summary>
+        /// <summary>
+        /// 反应式中止装饰器（离散 Key 语义）：监听黑板 Key，值发生<b>任意变化</b>时中止子树重评估。
+        /// <para>仅适合离散状态 Key（bool / enum / int 状态位）。连续浮点 Key（如 HpRatio）
+        /// 请用带谓词的重载，否则会每帧被打断。</para>
+        /// </summary>
         public BehaviorTreeBuilder Reactive<T>(string watchKey)
             => PushDecorator(new ReactiveNode<T>(watchKey));
+
+        /// <summary>
+        /// 反应式中止装饰器（谓词语义）：仅当 <paramref name="shouldAbort"/>(旧值, 新值) 返回 true 时才中止子树重评估。
+        /// <para>适合连续值 Key 的「跨越阈值」判定，例如：
+        /// <c>Reactive&lt;float&gt;(BBKeys.HpRatio, (o, n) =&gt; o &gt;= 0.3f &amp;&amp; n &lt; 0.3f)</c>。</para>
+        /// </summary>
+        public BehaviorTreeBuilder Reactive<T>(string watchKey, System.Func<T, T, bool> shouldAbort)
+            => PushDecorator(new ReactiveNode<T>(watchKey, shouldAbort));
 
         // ──────────────────────────────────────────────
         //  叶节点

@@ -13,8 +13,8 @@ namespace PumpGF
         /// <summary>当前执行到的子节点索引（记忆型复合节点使用）</summary>
         protected int CurrentIndex;
 
-        /// <summary>添加子节点（构建期调用）</summary>
-        public void AddChild(BTNode child)
+        /// <summary>添加子节点（构建期调用）。子类可重写以同步维护与子节点一一对应的附加数据。</summary>
+        public virtual void AddChild(BTNode child)
         {
             if (child == null) return;
             child.Parent = this;

@@ -20,7 +20,9 @@ namespace PumpGF
                 Log.Warning("BT", "LifecycleMgr 未初始化，无法绑定 Tick。");
                 return EmptyDisposable.Instance;
             }
-            return GameGlobal.LifecycleMgr.RegisterTick(channel, tree.Tick);
+            // 注意：RegisterTick 期望 Action<float>，而 tree.Tick 返回 NodeStatus，
+            // 不能直接传方法组（CS0407），用 lambda 包一层丢弃返回值。
+            return GameGlobal.LifecycleMgr.RegisterTick(channel, dt => tree.Tick(dt));
         }
 
         private sealed class EmptyDisposable : IDisposable

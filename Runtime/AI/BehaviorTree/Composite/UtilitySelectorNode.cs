@@ -33,15 +33,21 @@ namespace PumpGF
         /// <summary>为最近添加的子节点附加打分配置（构建期调用）。</summary>
         public void SetScorer(Func<TickContext, float> score, float weight, AnimationCurve curve)
         {
-            // 补齐 scorer 列表到与 Children 对齐
-            while (_scorers.Count < Children.Count)
-                _scorers.Add(new Scorer());
-
             if (_scorers.Count == 0) return;
             var s = _scorers[_scorers.Count - 1];
             s.Score = score;
             s.Weight = weight;
             s.Curve = curve;
+        }
+
+        /// <summary>
+        /// 添加子节点时同步创建默认 Scorer，保证 _scorers 与 Children 一一对齐。
+        /// 后续可通过 <see cref="SetScorer"/> 覆盖该子节点的打分配置。
+        /// </summary>
+        public override void AddChild(BTNode child)
+        {
+            base.AddChild(child);
+            _scorers.Add(new Scorer());
         }
 
         protected override void OnEnter(in TickContext context)
