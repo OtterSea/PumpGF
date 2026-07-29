@@ -14,6 +14,9 @@ namespace PumpGF
         /// <summary>生命周期管理模块（更新循环/暂停/时间缩放）</summary>
         public static LifecycleMgr LifecycleMgr { get; private set; }
 
+        /// <summary>就绪注册表模块（一等公民的"等待就绪"机制，消除时序竞态）</summary>
+        public static ReadinessRegistry Readiness { get; private set; }
+
         /// <summary>定时任务调度模块（延迟/周期/帧驱动，感知暂停与缩放）</summary>
         public static Scheduler Scheduler { get; private set; }
 
@@ -71,59 +74,63 @@ namespace PumpGF
             LifecycleMgr = new LifecycleMgr();
             LifecycleMgr.Init();
 
-            // 2. Scheduler（依赖 Lifecycle 的 Update 通道）
+            // 2. Readiness（无依赖，最早可用，供后续模块/业务注册与等待就绪）
+            Readiness = new ReadinessRegistry();
+            Readiness.Init();
+
+            // 3. Scheduler（依赖 Lifecycle 的 Update 通道）
             Scheduler = new Scheduler();
             Scheduler.Init();
 
-            // 3. Pool（无依赖）
+            // 4. Pool（无依赖）
             PoolMgr = new PoolMgr();
             PoolMgr.Init();
 
-            // 4. Resource（依赖 Pool）
+            // 5. Resource（依赖 Pool）
             ResMgr = new ResMgr();
             ResMgr.Init();
 
-            // 5. EventBus（无依赖）
+            // 6. EventBus（无依赖）
             EventBus = new EventBus();
             EventBus.Init();
 
-            // 6. Config（依赖 Res）
+            // 7. Config（依赖 Res）
             ConfigMgr = new ConfigMgr();
             ConfigMgr.Init();
 
-            // 7. GameDataStore（依赖 EventBus）
+            // 8. GameDataStore（依赖 EventBus）
             GameData = new GameDataStore();
             GameData.Init();
 
-            // 8. SaveMgr（依赖 GameDataStore）
+            // 9. SaveMgr（依赖 GameDataStore）
             SaveMgr = new SaveMgr();
             SaveMgr.Init();
 
-            // 9. UIManager（依赖 ResMgr/GameDataStore）
+            // 10. UIManager（依赖 ResMgr/GameDataStore）
             UIManager = new UIManager();
             UIManager.Init();
 
-            // 10. Localization（依赖 ResMgr）
+            // 11. Localization（依赖 ResMgr）
             Localization = new LocalizationMgr();
             Localization.Init();
 
-            // 11. AudioMgr（依赖 ResMgr/Scheduler）
+            // 12. AudioMgr（依赖 ResMgr/Scheduler）
             AudioMgr = new AudioMgr();
             AudioMgr.Init();
 
-            // 12. InputMgr（依赖 UIManager 联动 hooks）
+            // 13. InputMgr（依赖 UIManager 联动 hooks）
             InputMgr = new InputMgr();
             InputMgr.Init();
 
-            // 13. EntityManager（无强依赖，FSM 运行时关联）
+            // 14. EntityManager（无强依赖，FSM 运行时关联）
             EntityManager = new EntityManager();
             EntityManager.Init();
 
-            // 14. LevelManager（依赖 ResMgr/Lifecycle/UIManager）
+            // 15. LevelManager（依赖 ResMgr/Lifecycle/UIManager）
             LevelManager = new LevelManager();
             LevelManager.Init();
 
-            // 15. DebugConsole（最后，依赖其他模块指标；Release 时为空壳）
+            // 16. DebugConsole（最后，依赖其他模块指标；Release 时为空壳）
             DebugConsole = new DebugConsole();
             DebugConsole.Init();
 
@@ -155,6 +162,7 @@ namespace PumpGF
             ResMgr?.Dispose();
             PoolMgr?.Dispose();
             Scheduler?.Dispose();
+            Readiness?.Dispose();
             LifecycleMgr?.Dispose();
 
             DebugConsole = null;
@@ -171,6 +179,7 @@ namespace PumpGF
             ResMgr = null;
             PoolMgr = null;
             Scheduler = null;
+            Readiness = null;
             LifecycleMgr = null;
 
             Log.Info("GameGlobal", "PumpGF GameGlobal disposed.");

@@ -19,9 +19,12 @@ namespace PumpGF
         private LifecycleMgr _lifecycle;
 
         private readonly Dictionary<string, Func<ILevel>> _levelFactories = new(8);
+        private readonly Dictionary<string, Func<IPhasedLevel>> _phasedFactories = new(8);
         private readonly List<SceneHandle> _additiveScenes = new(8);
 
+        // 同一时刻只会有其中一个非空
         private ILevel _currentLevel;
+        private IPhasedLevel _currentPhasedLevel;
         private string _currentLevelKey;
         private IDisposable _updateSub;
         private bool _isLoading;
@@ -47,8 +50,13 @@ namespace PumpGF
                 // 应挂 Application.wantsToQuit 或在 LevelManager.UnloadCurrentLevelAsync 里手动 await。
                 SafeExitFireAndForget(_currentLevel).Forget();
                 _currentLevel = null;
-                _currentLevelKey = null;
             }
+            if (_currentPhasedLevel != null)
+            {
+                SafePhasedExitFireAndForget(_currentPhasedLevel).Forget();
+                _currentPhasedLevel = null;
+            }
+            _currentLevelKey = null;
 
             // 兜底卸载所有跟踪的场景句柄
             for (int i = 0; i < _additiveScenes.Count; i++)
@@ -57,6 +65,7 @@ namespace PumpGF
             }
             _additiveScenes.Clear();
             _levelFactories.Clear();
+            _phasedFactories.Clear();
             _isLoading = false;
         }
 
@@ -70,6 +79,19 @@ namespace PumpGF
             catch (Exception e)
             {
                 Log.Warning("LevelManager", $"Dispose 阶段关卡 OnExit 异常（已忽略）: {e.Message}");
+            }
+        }
+
+        private static async UniTaskVoid SafePhasedExitFireAndForget(IPhasedLevel level)
+        {
+            try
+            {
+                await level.OnExitAsync(default);
+            }
+            catch (OperationCanceledException) { /* 应用退出正常取消，吞掉 */ }
+            catch (Exception e)
+            {
+                Log.Warning("LevelManager", $"Dispose 阶段两阶段关卡 OnExit 异常（已忽略）: {e.Message}");
             }
         }
 
@@ -90,6 +112,24 @@ namespace PumpGF
 
         /// <summary>是否注册了指定关卡</summary>
         public bool HasLevel(string key) => _levelFactories.ContainsKey(key);
+
+        // ──────────────────────────────────────────────
+        //  关卡注册（两阶段）
+        // ──────────────────────────────────────────────
+
+        /// <summary>注册两阶段关卡（key → 工厂）。新关卡推荐使用此接口。</summary>
+        public void RegisterPhasedLevel(string key, Func<IPhasedLevel> factory)
+        {
+            if (_phasedFactories.ContainsKey(key))
+                Log.Warning("LevelManager", $"两阶段关卡 '{key}' 已注册，覆盖。");
+            _phasedFactories[key] = factory;
+        }
+
+        /// <summary>注销两阶段关卡</summary>
+        public void UnregisterPhasedLevel(string key) => _phasedFactories.Remove(key);
+
+        /// <summary>是否注册了两阶段关卡</summary>
+        public bool HasPhasedLevel(string key) => _phasedFactories.ContainsKey(key);
 
         // ──────────────────────────────────────────────
         //  关卡加载
@@ -125,15 +165,8 @@ namespace PumpGF
                 if (transition != null)
                     await transition.PlayFadeOut(progress, ct);
 
-                // 退出当前关卡
-                if (_currentLevel != null)
-                {
-                    _updateSub?.Dispose();
-                    _updateSub = null;
-                    await SafeExitAsync(_currentLevel, ct);
-                    _currentLevel = null;
-                    _currentLevelKey = null;
-                }
+                // 退出当前关卡（兼容旧 ILevel / 两阶段 IPhasedLevel）
+                await ExitCurrentAsync(ct);
 
                 // 进入新关卡
                 await level.OnEnterAsync(data, ct);
@@ -152,11 +185,70 @@ namespace PumpGF
             }
         }
 
-        /// <summary>卸载当前关卡</summary>
+        /// <summary>
+        /// 加载两阶段关卡。流程：过渡遮罩 → 退出当前关卡 →
+        /// <b>Preload（异步预载，带进度）</b> → <b>Activate（就绪激活）</b> → 绑定 Update → 揭开过渡。
+        /// <para>
+        /// Preload 与 Activate 严格两段：Activate 仅在 Preload 全部完成后执行，
+        /// 因此 Activate 内访问任何 Preload 产出的对象都是安全的，从流程上消除"边加载边消费"的竞态。
+        /// </para>
+        /// </summary>
+        public async UniTask LoadLevelPhasedAsync(
+            string key,
+            ILevelData data = null,
+            SceneTransition transition = null,
+            IProgress<float> progress = null,
+            UpdateChannel updateChannel = UpdateChannel.Logic,
+            CancellationToken ct = default)
+        {
+            if (_isLoading)
+            {
+                Log.Warning("LevelManager", $"正在加载关卡，忽略重复请求 '{key}'。");
+                return;
+            }
+            if (!_phasedFactories.TryGetValue(key, out var factory))
+            {
+                Log.Error("LevelManager", $"未注册两阶段关卡 '{key}'。");
+                return;
+            }
+
+            _isLoading = true;
+            try
+            {
+                var level = factory();
+
+                if (transition != null)
+                    await transition.PlayFadeOut(progress, ct);
+
+                // 退出当前关卡（兼容旧 ILevel / 两阶段 IPhasedLevel）
+                await ExitCurrentAsync(ct);
+
+                // ── 阶段 1：Preload（异步预载，禁止消费） ──
+                await level.OnPreloadAsync(data, progress, ct);
+
+                // ── 阶段 2：Activate（就绪激活：跨对象装配、就绪宣告） ──
+                // Preload 全部产出已就绪，此处访问任何 Preload 对象都是安全的
+                await level.OnActivateAsync(ct);
+
+                _currentPhasedLevel = level;
+                _currentLevelKey = key;
+
+                // Activate 完成后才绑定 Update Tick —— 消费窗口被彻底关闭
+                _updateSub = _lifecycle.RegisterTick(updateChannel, _levelTickDelegate);
+
+                if (transition != null)
+                    await transition.PlayFadeIn(ct);
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+        }
+        /// <summary>卸载当前关卡（兼容旧 ILevel 与两阶段 IPhasedLevel）</summary>
         public async UniTask UnloadCurrentLevelAsync(
             SceneTransition transition = null, CancellationToken ct = default)
         {
-            if (_currentLevel == null) return;
+            if (_currentLevel == null && _currentPhasedLevel == null) return;
             if (_isLoading) { Log.Warning("LevelManager", "正在加载，无法卸载。"); return; }
             _isLoading = true;
             try
@@ -166,8 +258,14 @@ namespace PumpGF
 
                 _updateSub?.Dispose();
                 _updateSub = null;
-                await SafeExitAsync(_currentLevel, ct);
+
+                if (_currentLevel != null)
+                    await SafeExitAsync(_currentLevel, ct);
+                else if (_currentPhasedLevel != null)
+                    await SafePhasedExitAsync(_currentPhasedLevel, ct);
+
                 _currentLevel = null;
+                _currentPhasedLevel = null;
                 _currentLevelKey = null;
 
                 if (transition != null)
@@ -177,6 +275,25 @@ namespace PumpGF
             {
                 _isLoading = false;
             }
+        }
+
+        /// <summary>退出并清空当前关卡（内部复用，兼容两阶段）</summary>
+        private async UniTask ExitCurrentAsync(CancellationToken ct)
+        {
+            _updateSub?.Dispose();
+            _updateSub = null;
+
+            if (_currentLevel != null)
+            {
+                await SafeExitAsync(_currentLevel, ct);
+                _currentLevel = null;
+            }
+            else if (_currentPhasedLevel != null)
+            {
+                await SafePhasedExitAsync(_currentPhasedLevel, ct);
+                _currentPhasedLevel = null;
+            }
+            _currentLevelKey = null;
         }
 
         // ──────────────────────────────────────────────
@@ -207,8 +324,11 @@ namespace PumpGF
         //  查询
         // ──────────────────────────────────────────────
 
-        /// <summary>当前关卡</summary>
+        /// <summary>当前关卡（旧 ILevel 路径）</summary>
         public ILevel CurrentLevel => _currentLevel;
+
+        /// <summary>当前两阶段关卡（IPhasedLevel 路径）</summary>
+        public IPhasedLevel CurrentPhasedLevel => _currentPhasedLevel;
 
         /// <summary>当前关卡 key</summary>
         public string CurrentLevelKey => _currentLevelKey;
@@ -233,11 +353,25 @@ namespace PumpGF
             }
         }
 
-        // 缓存的 Tick 转发函数，安全处理关卡切换瞬间 _currentLevel 变化
+        private async UniTask SafePhasedExitAsync(IPhasedLevel level, CancellationToken ct)
+        {
+            try
+            {
+                await level.OnExitAsync(ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception e)
+            {
+                Log.Error("LevelManager", $"两阶段关卡退出异常: {e}");
+            }
+        }
+
+        // 缓存的 Tick 转发函数，安全处理关卡切换瞬间 _currentLevel 变化（兼容两阶段）
         private void OnCurrentLevelTick(float dt)
         {
             var level = _currentLevel;
-            if (level != null) level.OnUpdate(dt);
+            if (level != null) { level.OnUpdate(dt); return; }
+            _currentPhasedLevel?.OnUpdate(dt);
         }
     }
 }

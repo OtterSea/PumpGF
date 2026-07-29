@@ -219,6 +219,40 @@ public void UpdateVelocity(ref Vector3 currentVelocity, float deltaTime)
 
 ---
 
+## 🚫 铁律 11：不准在 Awake/Start 获取运行时动态对象引用
+
+**禁止** 在 `Awake()` / `Start()` 中获取**运行时动态生成对象**的引用（`FindObjectOfType`、跨对象 `GetComponent`、全局静态赋值等），并用它解决"对方先就绪"的依赖。
+
+**禁止** 用 `WaitUntil(() => x != null)` 协程轮询等待就绪。
+
+**必须** 用下列三道防线之一（按场景选用，详见 [`时序竞态与初始化最佳实践.md`](./时序竞态与初始化最佳实践.md)）：
+
+| 场景 | 必须用 |
+|------|--------|
+| 全局/跨场景服务就绪 | `GameGlobal.Readiness.MarkReady<T>()` / `await WaitUntilReady<T>(ct)` |
+| 场景内同场景对象装配 | `ISceneInitializable` + `SceneBootstrapper`（按 Priority 有序） |
+| 关卡/场景加载流程 | `IPhasedLevel`（Preload 预载 → Activate 装配，Update 最后绑） |
+
+```csharp
+// 🚫 错误 — Start 里拿动态生成对象，编辑器正常打包后 NullRef
+void Start()
+{
+    _player = FindObjectOfType<PlayerController>();
+    _player.TakeDamage(10); // 打包后竞态：Player 尚未就绪
+}
+
+// ✅ 正确 — 全局服务走 Readiness
+async UniTaskVoid OnEnemySpawn(CancellationToken ct)
+{
+    var player = await GameGlobal.Readiness.WaitUntilReady<PlayerController>(ct);
+    player.TakeDamage(10);
+}
+```
+
+**原因**：Unity 不保证同场景内不同 MonoBehaviour 的 Awake/Start/Update 调用顺序。编辑器下资源从磁盘直载、有 JIT/域重载缓冲，常掩盖竞态；打包后（IL2CPP + 异步加载）初始化耗时与顺序变化，竞态即暴露为 NullRef（堆栈 `<00000000...>.0` 即 IL2CPP 去符号特征）。这是行业所称的"初始化顺序竞态（Initialization-Order Race Condition）"。
+
+---
+
 ## 速查表
 
 | # | 一句话 |
@@ -233,6 +267,7 @@ public void UpdateVelocity(ref Vector3 currentVelocity, float deltaTime)
 | 8 | 热路径零字符串分配 |
 | 9 | 输入走 InputMgr |
 | 10 | 角色物理只在 KCC 回调里改 |
+| 11 | 跨对象就绪走 Readiness / SceneBootstrapper / IPhasedLevel，不用 Awake/Start + WaitUntil |
 
 ---
 
