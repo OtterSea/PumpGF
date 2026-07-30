@@ -22,8 +22,9 @@ namespace PumpGF
         private readonly Dictionary<string, AssetEntry> _entries = new(64);
         // 实例 → 实例追踪条目
         private readonly Dictionary<GameObject, InstanceEntry> _instances = new(128);
-        // Addressables 初始化任务（缓存，防并发竞态）
-        private UniTask? _initTask;
+        // Addressables 初始化完成源（缓存，防并发竞态；UniTask 只能 await 一次，用 TCS 支持多调用方）
+        private UniTaskCompletionSource _initTcs;
+        private bool _addressablesInitialized;
 
         // ──────────────────────────────────────────────
         //  IModule
@@ -31,7 +32,8 @@ namespace PumpGF
 
         public void Init()
         {
-            _initTask = null;
+            _addressablesInitialized = false;
+            _initTcs = null;
         }
 
         // ──────────────────────────────────────────────
@@ -310,21 +312,38 @@ namespace PumpGF
 
         private UniTask EnsureAddressablesInitialized()
         {
-            if (_initTask == null)
-                _initTask = InitCoreAsync();
-            return _initTask.Value;
+            if (!_addressablesInitialized)
+            {
+                _addressablesInitialized = true;
+                _initTcs = new UniTaskCompletionSource();
+                InitCoreAsync(_initTcs).Forget();
+            }
+            return _initTcs.Task;
         }
 
-        private async UniTask InitCoreAsync()
+        private async UniTaskVoid InitCoreAsync(UniTaskCompletionSource tcs)
         {
-            var init = Addressables.InitializeAsync();
-            await init.ToUniTask();
-
-            if (init.Status != AsyncOperationStatus.Succeeded)
+            try
             {
-                _initTask = null;
-                Log.Error("ResMgr", "Addressables 初始化失败。");
-                throw new InvalidOperationException("[ResMgr] Addressables initialization failed.");
+                var init = Addressables.InitializeAsync();
+                await init.ToUniTask();
+
+                if (init.Status != AsyncOperationStatus.Succeeded)
+                {
+                    _addressablesInitialized = false;
+                    _initTcs = null;
+                    Log.Error("ResMgr", "Addressables 初始化失败。");
+                    tcs.TrySetException(new InvalidOperationException("[ResMgr] Addressables initialization failed."));
+                    return;
+                }
+                tcs.TrySetResult();
+            }
+            catch (Exception e)
+            {
+                _addressablesInitialized = false;
+                _initTcs = null;
+                Log.Error("ResMgr", "Addressables 初始化异常: " + e.Message);
+                tcs.TrySetException(e);
             }
         }
 
@@ -360,7 +379,8 @@ namespace PumpGF
                 }
             }
             _entries.Clear();
-            _initTask = default;
+            _addressablesInitialized = false;
+            _initTcs = null;
         }
 
         // ── 内部类型 ──

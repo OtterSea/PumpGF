@@ -21,6 +21,7 @@
 | 6. 关卡注册 | 注册式，key → ILevel 工厂 |
 | 7. Update 绑定 | LevelManager 统一绑定到 Lifecycle 通道 |
 | 8. 进度回调 | LoadLevelAsync 提供 IProgress<float> |
+| 9. 两阶段关卡（后续补充） | `IPhasedLevel`（Preload 预载→Activate 激活），消除"边加载边消费"竞态；新关卡优先用，旧 `ILevel` 单阶段保留兼容 |
 | 风格 | `LevelManager : IModule`，纳入 `GameGlobal`，纯 C# 类 |
 | 底层 | ResMgr SceneHandle + DOTween + R3/UniTask |
 
@@ -430,8 +431,21 @@ class LevelManager : IModule
 
     UniTask UnloadSceneAsync(SceneHandle handle, CancellationToken ct = default);
 
+    // ── 两阶段关卡（IPhasedLevel，新关卡推荐）──
+    void RegisterPhasedLevel(string key, Func<IPhasedLevel> factory);
+    void UnregisterPhasedLevel(string key);
+    bool HasPhasedLevel(string key);
+    UniTask LoadLevelPhasedAsync(
+        string key,
+        ILevelData data = null,
+        SceneTransition transition = null,
+        IProgress<float> progress = null,
+        UpdateChannel updateChannel = UpdateChannel.Logic,
+        CancellationToken ct = default);
+
     // ── 查询 ──
     ILevel CurrentLevel { get; }
+    IPhasedLevel CurrentPhasedLevel { get; }
     string CurrentLevelKey { get; }
     bool IsLoading { get; }
 
@@ -473,6 +487,24 @@ abstract class SceneTransition
 class FadeTransition : SceneTransition { ... }
 class LoadingScreenTransition : SceneTransition { ... }
 ```
+
+### 10.5 IPhasedLevel（两阶段关卡，新关卡推荐）
+
+```
+interface IPhasedLevel
+{
+    // 阶段1 预载：异步加载场景/实例化对象/加载依赖资源。禁止在此阶段消费。
+    UniTask OnPreloadAsync(ILevelData data, IProgress<float> progress, CancellationToken ct);
+
+    // 阶段2 激活：Preload 全部就绪后的跨对象装配 + Readiness.MarkReady 宣告。返回后 Update 才绑定。
+    UniTask OnActivateAsync(CancellationToken ct);
+
+    void OnUpdate(float dt);
+    UniTask OnExitAsync(CancellationToken ct);
+}
+```
+
+> 与 `ILevel` 并列、互不继承；`LevelManager` 分别提供 `LoadLevelAsync`（旧单阶段）与 `LoadLevelPhasedAsync`（两阶段）。新关卡必须用本接口，详见《时序竞态与初始化最佳实践》。
 
 ---
 
@@ -640,6 +672,12 @@ public class BattleLevel : ILevel
 
 - ILevel.OnExitAsync 内卸载 Additive 场景。
 - 或依赖 LevelManager 统一卸载（若 SceneHandle 由 LevelManager 持有）。
+
+### 15.7 新关卡必须用 IPhasedLevel 两阶段
+
+- ❌ 禁止：新关卡用单阶段 `ILevel.OnEnterAsync` 里"边加载边消费"（加载未完成就取引用/订阅/绑 Update）。
+- ✅ 正确：实现 `IPhasedLevel`——`OnPreloadAsync` 只做异步加载（禁止消费），`OnActivateAsync` 做跨对象装配 + `GameGlobal.Readiness.MarkReady`；用 `LevelManager.LoadLevelPhasedAsync` 加载。
+- 旧 `ILevel` 单阶段路径仅保留兼容，不再用于新关卡。
 
 ---
 

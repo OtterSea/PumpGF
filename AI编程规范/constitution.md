@@ -57,6 +57,7 @@ PumpGF 是可迁移的 Unity 游戏开发代码框架，补全引擎缺失的工
 | 存档读写 | SaveMgr | `SaveAsync` / `LoadAsync` / `GetSlotList` | SaveLoad指南 |
 | 延迟/定时/周期 | Scheduler | `Delay` / `ScheduleRepeat` / `CreateGroup` | Scheduler指南 |
 | 更新循环/暂停/时间缩放 | Lifecycle | `GetUpdateObservable` / `PushPause` / `SetChannelTimeScale` | Lifecycle指南 |
+| 跨对象就绪/等待初始化完成 | Readiness | `MarkReady<T>` / `await WaitUntilReady<T>(ct)` / `TryGet` | 时序竞态最佳实践 |
 | 配置加载与访问 | ConfigMgr | `Get<T>` / `GameConfigs.XXX` | ConfigManager指南 |
 | 对象池 | PoolMgr | `Get` / `Release` / `HasPool` | 对象池指南 |
 
@@ -76,7 +77,9 @@ PumpGF 是可迁移的 Unity 游戏开发代码框架，补全引擎缺失的工
 |----------|----------|----------|------|
 | 状态机/层级状态 | StateMachineBuilder | `Create` / `State` / `TransitionTo` / `Build` | FSM_HSM指南 |
 | 实体/组件管理 | EntityManager | `Create` / `Query<T>` / `Get<T>` | EntityComponent指南 |
-| 关卡/场景加载 | LevelManager | `LoadLevelAsync` / `RegisterLevel` | LevelSceneManager指南 |
+| 关卡/场景加载 | LevelManager | `LoadLevelAsync` / `RegisterLevel`（旧单阶段） | LevelSceneManager指南 |
+| 关卡/场景加载（新关卡，推荐） | LevelManager | `LoadLevelPhasedAsync` / `RegisterPhasedLevel`（`IPhasedLevel` 两阶段：Preload→Activate） | LevelSceneManager指南 / 时序竞态最佳实践 |
+| 场景内跨对象装配 | SceneBootstrapper | `ISceneInitializable`（`Priority` + `InitializeAsync`） | 时序竞态最佳实践 |
 
 ### 3.4 工程化层（Phase 4）
 
@@ -100,27 +103,29 @@ PumpGF 是可迁移的 Unity 游戏开发代码框架，补全引擎缺失的工
 
 ## 4. 模块初始化顺序
 
+`GameGlobal.EnsureInitialized` 按依赖顺序初始化（与 `Runtime/Core/GameGlobal.cs` 保持一致）：
+
 ```
-GameGlobal.EnsureInitialized 顺序：
-  1. LifecycleMgr    （最先，提供 Update/CTS）
-  2. PoolMgr
-  3. ResMgr
-  4. ConfigMgr
-  5. EventBus
-  6. GameDataStore
-  7. SaveMgr
-  8. Scheduler
-  9. UIManager
-  10. AudioMgr
-  11. InputMgr
-  12. LocalizationMgr
-  13. CameraMgr
-  14. EntityManager
-  15. LevelManager
-  16. DebugConsole     （最后）
+  1. LifecycleMgr    （最先，提供 Update 通道/CTS 给后续模块）
+  2. Readiness       （就绪注册表，无依赖，最早可用，供后续模块/业务注册与等待就绪）
+  3. Scheduler       （依赖 Lifecycle 的 Update 通道）
+  4. PoolMgr         （无依赖）
+  5. ResMgr          （依赖 PoolMgr）
+  6. EventBus        （无依赖）
+  7. ConfigMgr       （依赖 ResMgr）
+  8. GameDataStore   （依赖 EventBus）
+  9. SaveMgr         （依赖 GameDataStore）
+  10. UIManager      （依赖 ResMgr/GameDataStore）
+  11. LocalizationMgr（依赖 ResMgr）
+  12. AudioMgr       （依赖 ResMgr/Scheduler）
+  13. InputMgr       （依赖 UIManager 联动 hooks）
+  14. EntityManager  （无强依赖）
+  15. LevelManager   （依赖 ResMgr/Lifecycle/UIManager）
+  16. DebugConsole   （最后，依赖其他模块指标；Release 时为空壳）
 ```
 
-> 新增模块时按依赖关系插入合适位置。
+> 未列入本表的模块尚未接入 `GameGlobal` init 链：StateMachineBuilder 为纯 C# 库（非 IModule），业务直接创建；CameraMgr 待后续批次接入。
+> 新增模块时按依赖关系插入合适位置，并**同步更新本表与代码**（见第 8 节）。
 
 ---
 
@@ -142,6 +147,7 @@ GameGlobal.EnsureInitialized 顺序：
 | 订阅绑定生命周期 | `.AddTo(this)` / `.AddTo(ref Bag)`，不裸订阅 |
 | 事件用 readonly struct | 零分配，传 Id 不传大对象 |
 | 资源用完 Dispose | `AssetHandle.Dispose()` / `handle.AddTo(this)` |
+| 跨对象就绪/初始化时序 | 用 `Readiness` / `SceneBootstrapper` / `IPhasedLevel` 三道防线（见时序竞态最佳实践） |
 
 ### ❌ 禁止做
 
@@ -159,6 +165,8 @@ GameGlobal.EnsureInitialized 顺序：
 | 业务自己 `Instantiate` UI | `UIManager.Push/ShowPopup` |
 | 直接改 `Time.timeScale` 暂停 | `Lifecycle.PushPause` |
 | `GameObject.Find` 查找实体 | `EntityManager.Query<T>` |
+| Awake/Start 获取**运行时动态对象**引用 | `await Readiness.WaitUntilReady<T>` 或 `ISceneInitializable.InitializeAsync` |
+| `WaitUntil(() => x != null)` 轮询等待就绪 | `await Readiness.WaitUntilReady<T>(ct)` |
 
 ---
 
@@ -170,6 +178,8 @@ GameGlobal.EnsureInitialized 顺序：
 | R3 与 UniTask 用法 | [R3与UniTask使用指南.md](./R3与UniTask使用指南.md) |
 | 对象池用法 | [对象池使用指南.md](./对象池使用指南.md) |
 | KCC 用法 | [KCC使用指南.md](./KCC使用指南.md) |
+| 时序竞态与初始化（三道防线） | [时序竞态与初始化最佳实践.md](./时序竞态与初始化最佳实践.md) |
+| 约束铁律速查 | [PumpGF框架约束清单.md](./PumpGF框架约束清单.md) |
 | 各模块设计指南 | [PumpGF框架功能清单/](./PumpGF框架功能清单/) |
 
 ---
@@ -186,6 +196,44 @@ AI 接到复杂需求时，可参考 [SpecKit 工作流](./speckit/speckit工作
 小需求可直接编码（参考 `speckit.simple` 流程）。
 
 > **业务层的 SpecKit 产出**存放在业务项目根目录的 `.specify/`，**不放入框架包**。
+
+---
+
+## 8. 文档同步纪律（元规则，AI 必读）
+
+> **改了框架代码却不更新文档，等于没改**——下一个 Coding AI 会按过时文档生成错误代码。
+> 本节是约束 Coding AI **自身行为**的元规则，优先级与第 5 节等同。
+
+### 8.1 触发条件
+
+凡是修改了 `Packages/PumpGF/` 下的框架源码（`Runtime/` 或 `Editor/`），提交前**必须**按下表逐条核对是否需要同步文档：
+
+| 改动类型 | 必查并同步的文档 |
+|----------|------------------|
+| 新增/删除/重命名模块（`IModule` 实现） | 本宪章第 3 节路由表 + 第 4 节初始化顺序；`框架说明.md` 模块表 |
+| 新增/修改 public API（方法/属性/签名） | 对应模块功能设计指南；本宪章第 3 节 API 列；`PumpGF框架约束清单.md` 速查表 |
+| 新增框架级硬约束（禁止/必须模式） | `PumpGF框架约束清单.md`（铁律 + 速查表）；`开发编程规范.md` 必读指引 |
+| 新增接口/抽象（如 `IPhasedLevel`、`ISceneInitializable`） | `框架说明.md` 运行时层；对应模块设计指南 API 契约 |
+| 新增最佳实践/反模式专题 | 新增专题文档；`框架说明.md` 文档索引；`开发编程规范.md` 必读指引；本宪章第 6 节 |
+| 改 `GameGlobal` 初始化/释放顺序 | 本宪章第 4 节；`框架说明.md` |
+
+### 8.2 文档清单（必须与代码保持一致）
+
+| 文档 | 职责 | 代码锚点 |
+|------|------|----------|
+| `constitution.md`（本文件） | AI 编码最高纲领：能力路由 + 约束 + 初始化顺序 | `Runtime/Core/GameGlobal.cs`、`Runtime/` 全模块 |
+| `框架说明.md` | 框架是什么：能力总览 + 运行时层 + 文档索引 | `Runtime/` 目录结构 |
+| `PumpGF框架约束清单.md` | 铁律 + 速查表 | 所有 public API 与禁止项 |
+| `开发编程规范.md` | 编码流程规范入口 | — |
+| `PumpGF框架功能清单/<模块>模块功能设计指南.md` | 单模块 API 契约与用法 | 对应模块 `.cs` |
+| `时序竞态与初始化最佳实践.md` | 时序防线专题 | `Readiness/`、`Scene/`、`Level/IPhasedLevel.cs` |
+
+### 8.3 判定原则
+
+- **API 变了 → 文档必须变**：方法名/参数/返回类型变化，对应设计指南的"API 契约"必须同步。
+- **行为变了 → 文档必须变**：即使签名没变，语义变化（如新增异步阶段、改初始化顺序）也要同步。
+- **仅内部实现变了 → 文档不必变**：重构、性能优化、不影响对外契约的 bug 修复，不强制更新。
+- **拿不准 → 更新**：宁可多写一行，也不要让下一个 AI 按错误文档生成代码。
 
 ---
 
