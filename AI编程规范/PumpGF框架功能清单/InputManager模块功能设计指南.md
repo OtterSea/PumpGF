@@ -21,6 +21,7 @@
 | 6. InputContext 定义 | 枚举（类型安全，游戏可扩展） |
 | 7. UIManager 联动 | `PageConfig` 增加 `InputContext` 字段，Push/Pop 页面时自动切换 |
 | 8. Global ActionMap | 保留一个始终启用的 ActionMap（ESC 返回、截图、Debug 等） |
+| 9. 触控/虚拟摇杆 | 仅用 New Input System 官方 On-Screen Controls（`OnScreenStick`/`OnScreenButton`），值经 InputAction 回流；**禁止引入 JoystickPack 等绕开 InputAction 的旧 `Input.GetAxis` 类插件**。详见 §15 |
 | 风格 | `InputMgr : IModule`，纳入 `GameGlobal`，纯 C# 类 |
 | 底层 | New Input System + R3 |
 
@@ -55,6 +56,8 @@
 | ❌ 手柄震动/触觉反馈 | 可后续扩展，本阶段不做 |
 | ❌ 输入录制/回放 | 过重，未来需求 |
 | ❌ 多人本地输入分屏 | 本阶段不做（单机） |
+| ❌ 第三方虚拟摇杆插件（JoystickPack 等） | 绕开 InputAction / 依赖旧 `Input.GetAxis`，破坏"一切输入走 InputMgr"架构，且引入付费/维护外依赖，损害框架可迁移性。触控改用官方 On-Screen Controls，见 §15 |
+| ❌ 具体游戏的触控布局与玩法语义（瞄准/技能环等） | 属业务层，框架只提供移动摇杆等通用基建，见 §15.5 |
 
 ---
 
@@ -443,6 +446,7 @@ class InputMgr : IModule
     // ── 查询 ──
     bool HasAction(string actionName);
     bool IsActionEnabled(string actionName);  // 当前上下文是否启用
+    InputScheme CurrentInputScheme { get; }   // 当前输入方案（KeyboardMouse/Gamepad/Touch），见 §15.3；供业务据此切换瞄准与触控 UI 显隐
 
     // ── IModule ──
     void Init();
@@ -461,6 +465,18 @@ public enum InputContext
     Dialog,
     Cutscene,
     Debug,
+}
+```
+
+### 9.3 InputScheme 枚举
+
+```
+// 当前活跃输入方案，用于业务据设备切换瞄准/触控 UI 显隐（见 §15.3）
+public enum InputScheme
+{
+    KeyboardMouse,
+    Gamepad,
+    Touch,
 }
 ```
 
@@ -571,6 +587,8 @@ InputMgr.OnActionPerformed("UI_Back")  // 定义在 Global ActionMap
 - [ ] `RemapBinding`/`GetBindingPath`/`ResetBinding` 重映射
 - [ ] `StartRebind`/`CancelRebind` 重映射 UI 钩子
 - [ ] 重映射持久化到 GameDataStore
+- [ ] `CurrentInputScheme` 输入方案查询（KeyboardMouse/Gamepad/Touch，§15.3）
+- [ ] 触控接入仅用官方 On-Screen Controls，值经 InputAction 回流（§15，禁止第三方摇杆插件）
 - [ ] UIManager `PageConfig.InputContext` 联动
 - [ ] `Init` 时加载默认 InputContext（如 Battle）
 - [ ] `Dispose` 清理所有订阅与缓冲
@@ -637,6 +655,76 @@ InputMgr.OnActionPerformed("UI_Back")  // 定义在 Global ActionMap
 
 - 框架提供能力，业务按需启用。
 - 不需要重映射的项目可忽略此 API。
+
+---
+
+## 15. 触控输入与虚拟摇杆（移动平台）
+
+> 面向 Android / WebGL 触控发布。本节确立"触控输入怎么接入框架"的**唯一正确路径**，
+> 并划清框架层与业务层的职责边界。核心原则：**触控只是又一个喂给 InputAction 的输入设备，
+> 下游消费方（`InputMgr` / `ICharacterInputSource` / FSM）完全无感知。**
+
+### 15.1 选型决策：官方 On-Screen Controls，拒绝第三方摇杆插件
+
+| 方案 | 结论 | 理由 |
+|------|------|------|
+| **New Input System 官方 `OnScreenStick` / `OnScreenButton`** | ✅ 采用 | 随 Input System 包自带、免费、官方维护、零额外依赖；控件值直接写入 InputAction，天然融入本模块 |
+| JoystickPack 等第三方摇杆插件 | ❌ 禁止 | 基于旧 `Input.GetAxis`，自行维护 `Direction` 值，需业务**直接读组件**，**完全绕开 InputAction 与 InputMgr**；破坏"一切输入走 InputMgr、禁止直接读设备"的架构铁律，且引入外部依赖损害框架可迁移性 |
+
+> **为什么官方方案零成本融入**：`OnScreenStick` 挂在 UI 控件上，配置 `Control Path` 指向某个设备控件（如 `<Gamepad>/leftStick`），
+> 玩家拖动时它把归一化向量**注入 InputAction**。于是 `InputMgr.GetAxisValue("Move")` 收到的值与真实手柄左摇杆**完全同源同形**，
+> `PlayerInputSource` / `ICharacterInputSource` **一行都不用改**。这正是本模块"输入源与消费方经 InputAction 解耦"的架构红利。
+
+### 15.2 架构接入点（值的流向）
+
+```
+[屏幕虚拟摇杆 OnScreenStick]  ─┐
+[真实手柄左摇杆 leftStick]    ─┼─► InputAction "Move" ─► InputMgr.GetAxisValue("Move")
+[键盘 WASD 合成 Vector2]      ─┘                              │
+                                                              ▼
+                                              ICharacterInputSource.Move（消费方无感知设备来源）
+```
+
+- 触控设备与实体设备**共用同一个 Action**（如 "Move"），或按需绑定到独立 ControlScheme，二选一（见 §15.4）。
+- 无论哪种，最终都以 `InputAction.ReadValue<Vector2>()` 收口，`InputMgr` 与业务读值方式不变。
+
+### 15.3 框架层提供的通用触控基建（可迁移、不绑玩法）
+
+框架**只**沉淀与具体游戏无关的通用能力：
+
+| 基建 | 说明 | 归属 |
+|------|------|------|
+| 官方 On-Screen Controls 接入约定 | 本节规范本身；虚拟摇杆值必须经 InputAction 回流，禁止业务直接读控件组件 | InputMgr 规范 |
+| 当前输入方案查询（建议提供） | `InputMgr` 暴露 `CurrentInputScheme`（`KeyboardMouse` / `Gamepad` / `Touch`），供业务据此切换瞄准/UI 显隐等表现（把散落在业务 `PlayerInputSource` 的 `Gamepad.current.wasUpdatedThisFrame` 设备检测上收为框架能力） | InputMgr |
+| 触控层显隐与 SafeArea 适配 | 竖屏安全区适配、按平台/输入方案自动显隐触控 UI 根节点 | UI Framework 模块（非本模块，另行沉淀） |
+
+> **移动摇杆是框架承诺提供的通用基建**：一个绑定到 "Move" Action 的 `OnScreenStick` 布局约定 + 预制体约定，
+> 可随框架迁移到任意项目直接复用。
+
+### 15.4 ControlScheme 约定（二选一，业务据平台取舍）
+
+- **方案 A（推荐，最省事）**：`OnScreenStick.controlPath = <Gamepad>/leftStick`，直接复用现有 Battle map 的 "Move" Action，
+  触控与手柄同链路，无需新增 ControlScheme。适合"触控与手柄行为一致"的动作游戏。
+- **方案 B（需要区分设备时）**：新增独立 `Touch` ControlScheme + 虚拟设备绑定，配合 §15.3 的 `CurrentInputScheme` 做设备分流。
+  适合需要"检测到触控时切换专属 UI/瞄准"的项目。
+
+### 15.5 业务层职责（框架不代劳）
+
+以下属**具体游戏**决定，框架不提供、不预设：
+
+- 触控 UI 的**具体布局**（摇杆位置/大小、按钮排布、竖屏适配细节）。
+- **瞄准 / 朝向的触控语义**（右摇杆瞄准 / 依赖自动瞄准 / 攻击摇杆二合一 等）——各游戏手感诉求不同，由项目自定。
+- 触控专属的技能环、连招板、手势等玩法级交互。
+- 是否需要为触控新增 `ICharacterInputSource` 实现：**通常不需要**——因为移动/攻击/冲刺的值都经 InputAction 回流，
+  现有 `PlayerInputSource` 直接可用；仅当项目要引入"触控独有语义"（如触控瞄准）时，才在业务层扩展实现。
+
+### 15.6 关键规范（触控接入 Coding AI 必读）
+
+1. ❌ 禁止引入 JoystickPack 及任何绕开 InputAction 的第三方摇杆/触控输入插件。
+2. ❌ 禁止业务代码直接读取 `OnScreenStick` / `OnScreenButton` 组件的值；一律经 `InputMgr.GetAxisValue / GetButtonValue` 读取对应 Action。
+3. ✅ 虚拟摇杆的 `Control Path` 绑定到与实体设备同源的 Action（如 "Move"），保证下游消费方无感知。
+4. ✅ 触控 UI 的显隐 / SafeArea 适配走 UI Framework，不在输入模块内硬编码布局。
+5. ✅ 需要按设备分流表现时，用框架 `CurrentInputScheme`，禁止在业务里各自零散检测 `Gamepad.current` / `Touchscreen.current`。
 
 ---
 
