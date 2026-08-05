@@ -455,7 +455,7 @@ namespace PumpGF
         //  配置加载
         // ──────────────────────────────────────────────
 
-        /// <summary>异步加载 AudioConfigSO，合并 entry 到查找表。key 重复时 Warning + 覆盖。</summary>
+        /// <summary>异步加载 AudioConfigSO，合并 entry 到查找表。key 重复时 Warning + 保留首份跳过（不覆盖）。</summary>
         public async UniTask LoadConfigAsync(string configKey, CancellationToken ct = default)
         {
             if (_configHandles.ContainsKey(configKey))
@@ -473,7 +473,10 @@ namespace PumpGF
                 {
                     if (string.IsNullOrEmpty(e.Key)) continue;
                     if (_entries.ContainsKey(e.Key))
-                        Log.Warning("AudioMgr", $"音频 key '{e.Key}' 重复，覆盖。");
+                    {
+                        Log.Warning("AudioMgr", $"音频 key '{e.Key}' 重复，保留首份并跳过（不覆盖）。");
+                        continue;
+                    }
                     _entries[e.Key] = e;
                     addedKeys.Add(e.Key);
                 }
