@@ -24,6 +24,7 @@
 | 风格 | `UIManager : IModule`，纳入 `GameGlobal`，纯 C# 类 |
 | 底层 | uGUI + R3（ReactiveProperty/BindTo/OnClickAsObservable） |
 | Editor 工具 | `Auto_` 命名约定工作流预留需求说明（见 §14），本阶段不实现 |
+| 9. UI 粒子特效 | 采用 UIParticle 4.13.3（mob-sakai，MIT，Vendor 嵌入 `Vendor/UIParticle/`），框架不封装 Mgr，业务层直接用 `Coffee.UIExtensions.UIParticle`（见 §20） |
 
 ---
 
@@ -848,6 +849,7 @@ public class PlayerHUDView : View<PlayerHUDViewModel>, IHud
 | R3 | 引用 | ReactiveProperty/BindTo/OnClickAsObservable |
 | UniTask | 引用 | 异步打开/关闭/动画 |
 | DOTween | 可选引用 | UI 动画（业务自选，框架不强制） |
+| UIParticle | 可选引用 | UI 上的粒子特效（业务自选，框架不封装，见 §20） |
 | GameGlobal | 被引用 | 暴露 UIManager |
 
 > **初始化顺序**：... → UIManager（在 ResMgr/GameDataStore 之后）
@@ -903,6 +905,52 @@ public class PlayerHUDView : View<PlayerHUDViewModel>, IHud
 ### 19.7 异步操作必须传 CancellationToken
 
 - `Push`/`Pop`/`ShowPopup` 等异步 API 必传 ct，防页面销毁后回调悬空。
+
+---
+
+## 20. UI 上的粒子特效（UIParticle 使用指南）
+
+> UIParticle（mob-sakai / ParticleEffectForUGUI 4.13.3，MIT）以 Vendor 嵌入源码方式集成于 `Packages/PumpGF/Vendor/UIParticle/`。
+> **框架不封装 UIParticleMgr**（与 KCC 同原则：UI 特效呈现太游戏特异），业务层直接使用 `Coffee.UIExtensions` 命名空间。
+
+### 20.1 基本用法
+
+- **编辑器一键创建**：Hierarchy 右键 → `GameObject/UI/Particle System`，自动创建挂有 `UIParticle` 组件的 UI 节点 + 子级 ParticleSystem，并赋默认 `UIAdditive` 材质。
+- **手动创建**：任意 UI 节点（RectTransform + CanvasRenderer）挂 `UIParticle` 组件，把普通 `ParticleSystem` 放为其子物体即可；无需额外 Camera / RenderTexture / 独立 Canvas，粒子直接参与 uGUI 排序与遮罩。
+- **代码控制**：`UIParticle.Play() / Pause() / Resume() / Stop() / Clear()`；`particles` 拿到管辖的 ParticleSystem 列表；粒子 prefab 可用 `SetParticleSystemPrefab(prefab)` 动态换。
+- **吸附特效**：`UIParticleAttractor` 组件实现"粒子飞向某个 UI 节点"（如金币飞入背包）。
+- CoworkAI/AI 生成的普通 ParticleSystem prefab 可直接挂到 UIParticle 节点下使用，无需改造。
+
+### 20.2 与框架对象池协同（高频 UI 特效必须遵守）
+
+- UI 特效属于「高频创建销毁对象」，**禁止裸 `Instantiate/Destroy`**（见 PumpGF框架约束清单 铁律、踩坑记录 §16）。
+- 池化单元是**整个 UI 特效 prefab**（UIParticle 根节点 + 子 ParticleSystem），池注册沿用 `PoolMgr.Register` / `EffectPlayer.RegisterEffectPool` 范式，**用前必须先 Register**，否则静默不显示。
+- 取池后挂到目标 Canvas 节点下（`SetParent(uiParent, false)`），`onGet` 调 `UIParticle.Play()`，`onRelease` 调 `UIParticle.Stop()` + `Clear()` 再 `SetActive(false)`。
+- ParticleSystem 的 `main.stopAction` 必须保持 `None`（同场景特效池约定），由池负责回收，禁止自销毁。
+- 低频一次性 UI 特效（如结算界面播放一次）可不池化，随页面 prefab 一起加载/销毁即可。
+
+### 20.3 Mask / RectMask2D 与 shader 选择
+
+- UIParticle 继承 `MaskableGraphic`，**同时支持 Mask（Stencil）与 RectMask2D（CLIP_RECT）**，这是它替代"独立 Canvas 方案"的核心价值。
+- 粒子材质必须选 **UI 系 shader**：
+  - 发光/加色特效 → 内置 `UI/Additive`（`Vendor/UIParticle/Shaders/UIAdditive.mat`，菜单自动赋的就是它）；
+  - 普通贴图粒子 → 引擎内置 `UI/Default`。
+- ❌ 禁止给 UI 粒子用 3D 粒子材质（`Particles/Standard Unlit`、`Universal Render Pipeline/Particles/*`）——它们不响应 UI 遮罩，且在 Canvas 下排序异常。
+- RectMask2D 下 shader 需支持 `UNITY_UI_CLIP_RECT`（内置 `UI/Additive` 与 `UI/Default` 均已支持）。
+
+### 20.4 移动端性能建议（Android/WebGL）
+
+- **Mesh Sharing**：同屏多个相同特效时，`UIParticle.meshSharing` 设为 `Auto`（默认即 Auto 倾向共享），同组（`groupId` 相同）粒子共享烘焙网格，显著降低烘焙开销；单实例特效保持 `None`。
+- **Auto Scaling**：开 `autoScaling` 让粒子随 Canvas 缩放，避免为大分辨率放大粒子数/尺寸造成的 overdraw。
+- **控制 overdraw**：加色混合（Additive）大面积粒子是移动端发热大户，限制粒子数与粒子尺寸；优先小面积、短时长。
+- **粒子系统自身**：UI 粒子禁用 Collision / Lights / Trails（除非必要），Max Particles 给硬上限，Simulation Space 用 Local。
+- **Bake 开销**：UIParticle 每帧将 ParticleSystem 烘焙为 UI Mesh，同屏 UIParticle 实例数建议个位数；大量同效果实例务必 Mesh Sharing + 对象池复用。
+
+### 20.5 集成注意事项（AI 必读）
+
+- 首次导入后，库会在 **`Assets/ProjectSettings/UIParticleProjectSettings.asset`** 自动生成设置资产，并加入 `PlayerSettings.preloadedAssets`——**该文件要提交版本库，不要删**；设置面板在 `Project Settings/UI/UI Particle`（颜色空间自动校正、烘焙视图尺寸等）。
+- `Vendor/UIParticle/Runtime/Coffee.UIParticle.R.dll` 是上游自带的托管裁剪标记程序集（仅含 `AlwaysLinkAssembly` 属性，无任何类型），**保留勿删**，与 R3 的 BCL DLL 冲突先例无关（程序集名唯一，无冲突风险）。
+- 组件图标路径已按 Vendor 嵌入位置修正（上游原值为 `Packages/com.coffee.ui-particle/...`），升级库版本时注意这 3 行 diff（`UIParticle.cs` / `UIParticleRenderer.cs` / `ParticleSystemPreviewer.cs`）。
 
 ---
 
